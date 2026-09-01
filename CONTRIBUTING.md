@@ -58,7 +58,7 @@ Clone the repository and install in editable mode with the development and
 optional `astroalign` extras:
 
 ```bash
-git clone https://github.com/borisfrast/astra.git
+git clone https://github.com/borisfrast-oss/astra.git
 cd astra
 pip install -e .[dev,astroalign]
 ```

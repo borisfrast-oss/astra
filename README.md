@@ -167,7 +167,7 @@ algorithms takes a lot of time (and coffee). If Astra improves your astrophotos,
 saves you from cloud dependence, or simply saves you time, a small contribution
 would mean the world.
 
-- [Sponsor on GitHub](https://github.com/sponsors/borisfrast)
+- [Sponsor on GitHub](https://github.com/sponsors/borisfrast-oss)
 
 Thank you for your support — and clear skies!
 
