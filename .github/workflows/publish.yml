@@ -1,0 +1,59 @@
+name: publish
+
+on:
+  push:
+    # Final SemVer tags only (e.g. v1.9.0, v1.9.1). Excludes ALL pre-release
+    # suffixes (v1.9.0-rc1, v1.9.0-RC1, v1.9.0-beta, ...).
+    # GitHub Actions evaluates tags in order: a matching negative pattern after
+    # a positive match excludes the ref (docs: workflow-syntax on.push.tags).
+    tags: ['v*.*.*', '!v*.*.*-*']
+
+permissions:
+  id-token: write
+  contents: read
+
+# Trusted-Publisher-Binding: PyPI-TP-Eintrag muss auf DIESEN Workflow-Namen + environment zeigen.
+# NACH dem Split: TestPyPI-TP auf `publish-testpypi.yml` + `testpypi` umkonfigurieren (Maintainer one-time setup).
+# Prod-TP bleibt `publish.yml` + `pypi`.
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build sdist + wheel
+        run: |
+          pip install build
+          python -m build --outdir dist .
+      - name: Check dist
+        run: |
+          ls -lh dist/
+          python -m pip install --dry-run dist/*.whl || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    # Defense-in-depth: prod publish only for final SemVer tags (no pre-release suffix).
+    if: ${{ !contains(github.ref, '-') }}
+    environment:
+      name: pypi
+      url: https://pypi.org/p/astra-pipeline
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI (OIDC trusted publisher)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
+          repository-url: https://upload.pypi.org/legacy/

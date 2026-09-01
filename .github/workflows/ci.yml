@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "v1.9", "v1.9.*"]
+  pull_request:
+    branches: ["main", "v1.9"]
+
+jobs:
+  ci:
+    name: ci (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: "pip"
+
+      - name: Install (editable + dev)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+        shell: bash
+
+      - name: Pytest
+        run: |
+          python -m pytest tests -q
+        shell: bash
+        continue-on-error: false
+
+      - name: Smoke astra --help
+        run: |
+          astra --help
+          astra doctor --help
+        shell: bash
+
+      - name: Docs hash check
+        run: |
+          python scripts/generate_docs.py check
+        shell: bash
+        continue-on-error: true
