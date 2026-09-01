@@ -24,6 +24,7 @@ Teststrategie (wie bestehende CLI-Tests):
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -119,6 +120,10 @@ def _invoke_process_mocked(runner: CliRunner, args: list[str], tmp_path: Path):
 
 
 class TestB1ConfigDiscovery:
+    @pytest.mark.skipif(
+        os.name != "nt",
+        reason="Windows-absolute-path semantics (C:/ drive letters); precedence is covered by test_pipeline_root_config_used_without_cwd_config and test_explicit_path_wins_over_discovery on other platforms.",
+    )
     def test_cwd_config_preferred_over_pipeline_root(self, tmp_path, monkeypatch):
         """CWD config.yaml gewinnt ueber {pipeline_root}/config.yaml."""
         cwd = tmp_path / "cwd"

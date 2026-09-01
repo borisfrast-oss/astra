@@ -33,7 +33,9 @@ dependencies = [
     "jinja2>=3.1",
     "structlog>=24.0",
     "pyyaml>=6.0",
-    "click>=8.1",
+    # click 8.5 changes Flag-default rendering (Sentinel); pin keeps fresh
+    # installs deterministic and the CI docs-check consistent.
+    "click>=8.1,<8.5",
     "rich>=13.0",
     "prompt-toolkit>=3.0",
     "python-dotenv>=1.0",
@@ -47,6 +49,13 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
     "yamllint>=1.35",
+    # Full test-suite environment (CI-equivalent). Mirrors the astroalign extra
+    # plus astroquery so that `pip install -e .[dev]` runs every test without
+    # optional-dependency skips.
+    "astroalign>=2.6,<3",
+    "scikit-image>=0.24",
+    "sep>=1.4",
+    "astroquery>=0.4",
 ]
 graxpert = ["graxpert>=3.2"]
 astro = ["astrometry-net>=0.97"]
