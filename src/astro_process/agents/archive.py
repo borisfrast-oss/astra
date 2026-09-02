@@ -212,6 +212,40 @@ class ArchiveAgent:
         return None
 
     @staticmethod
+    def _resolve_registered_frames(proc_result, multi_group_metadata: dict | None = None) -> int:
+        """DEF-009: Ermittelt registered_frames aus der Quelle der Wahrheit.
+
+        Reihenfolge:
+        1. Multi-Group: Summe von frames_registered ueber alle Gruppen in
+           multi_group_metadata["groups"][*]["registration_metrics"].
+        2. Single-Group: proc_result.registration_metrics["frames_registered"].
+        3. Legacy-Fallback: Laenge von proc_result.registered_frames.
+        """
+        # 1. Multi-Group
+        if multi_group_metadata:
+            groups = multi_group_metadata.get("groups") or {}
+            total = 0
+            found = False
+            for meta in groups.values():
+                reg_metrics = meta.get("registration_metrics") or {}
+                frames_registered = reg_metrics.get("frames_registered")
+                if frames_registered is not None:
+                    total += int(frames_registered)
+                    found = True
+            if found:
+                return total
+
+        # 2. Single-Group
+        reg_metrics = getattr(proc_result, "registration_metrics", None) or {}
+        frames_registered = reg_metrics.get("frames_registered")
+        if frames_registered is not None:
+            return int(frames_registered)
+
+        # 3. Legacy-Fallback
+        registered_frames = getattr(proc_result, "registered_frames", None) or []
+        return len(registered_frames) if registered_frames else 0
+
+    @staticmethod
     def _read_reg_rot_from_fits(fits_path: Path | None) -> float | None:
         """V1.5-4 / DADR-014: REG_ROT aus dem Final-FITS-Header lesen.
 
@@ -370,7 +404,13 @@ class ArchiveAgent:
             # sources (befuellt durch resolve_equipment in der Discovery).
             "equipment": self._equipment_block(context),
             "processing": {
-                "registered_frames": len(proc_result.registered_frames) if proc_result.registered_frames else 0,
+                # DEF-009: registered_frames aus registration_metrics speisen
+                # (Quelle der Wahrheit). Multi-Group: Summe ueber die Gruppen;
+                # Single-Group: top-level registration_metrics.frames_registered;
+                # Legacy: Fallback auf die Frame-Liste.
+                "registered_frames": (
+                    self._resolve_registered_frames(proc_result, multi_group_metadata)
+                ),
                 "stacked": str(proc_result.stacked) if proc_result.stacked else None,
                 "exports": [str(e) for e in proc_result.exports] if proc_result.exports else [],
                 # QF-B (AC-QF-B1): frame_quality je Frame (QF-A-Schema,

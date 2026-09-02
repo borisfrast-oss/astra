@@ -2,22 +2,24 @@
 
 import json
 import os
-from pathlib import Path
-from typing import Optional
-from datetime import datetime
 import queue
 import re
 import shutil
 import sys
 import threading
+from datetime import datetime
+from pathlib import Path
+
 import click
 import structlog
 import yaml
 
 try:
-    from importlib.metadata import version as _get_version, PackageNotFoundError
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _get_version
 except ImportError:  # pragma: no cover
-    from importlib_metadata import version as _get_version, PackageNotFoundError  # type: ignore
+    from importlib_metadata import PackageNotFoundError
+    from importlib_metadata import version as _get_version  # type: ignore
 
 
 def _resolve_cli_version() -> str:
@@ -49,8 +51,8 @@ def _apply_resolver_result(effective_registration, resolver_result: dict) -> Non
 
 try:
     from rich.console import Console
-    from rich.table import Table
     from rich.panel import Panel
+    from rich.table import Table
     HAS_RICH = True
 except ImportError:
     HAS_RICH = False
@@ -65,7 +67,14 @@ except ImportError:
     HAS_PT = False
     pt_prompt = None  # type: ignore
 
-from .config import AppConfig, load_config, save_default_config
+from .agents.archive import create_archive_agent
+from .agents.calibration import CalibrationResult, create_calibration_agent
+from .agents.cosmetic_agent import create_cosmetic_agent
+from .agents.debayer_agent import create_debayer_agent
+from .agents.discovery import create_discovery_agent
+from .agents.merge_agent import MergeAgent
+from .agents.processing_agent import create_processing_agent
+from .config import AppConfig, load_config
 from .config.loader import (
     DEFAULT_CONFIG,
     resolve_export_config,
@@ -74,18 +83,11 @@ from .config.loader import (
     resolve_registration,
     resolve_stack_scale_factor,
 )
-from .config.models import MultiGroupConfig, MergeConfig, PipelinePreset
-from .models.core import ObservationContext, PipelineConfig, PhaseStatus
+from .config.models import MergeConfig, MultiGroupConfig, PipelinePreset
 from .core.fits_parser import build_observation_context
-from .core.staging import stage_input
-from .agents.discovery import create_discovery_agent
-from .agents.calibration import create_calibration_agent, CalibrationResult
-from .agents.debayer_agent import create_debayer_agent
-from .agents.cosmetic_agent import create_cosmetic_agent
-from .agents.processing_agent import create_processing_agent
 from .core.stacking import resolve_stack_method
-from .agents.archive import create_archive_agent
-from .agents.merge_agent import MergeAgent
+from .core.staging import stage_input
+
 
 def _rich_console():
     if HAS_RICH:
@@ -198,8 +200,8 @@ def _run_preflight_checks(target_dir: Path, cfg: AppConfig, darks_path_override=
         clipping = False
         for p in fits_files[:3]:
             try:
-                from astropy.io import fits as afits
                 import numpy as np
+                from astropy.io import fits as afits
                 with afits.open(p) as hdul:
                     data = hdul[0].data
                     if data is None:
@@ -312,11 +314,11 @@ def cli(ctx, config, verbose):
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = config
     ctx.obj["verbose"] = verbose
-    
+
     # Load configuration
     cfg = load_config(config)
     ctx.obj["config"] = cfg
-    
+
     if verbose:
         structlog.configure(
             wrapper_class=structlog.make_filtering_bound_logger(10)  # DEBUG
@@ -587,9 +589,9 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
     cfg: AppConfig = ctx.obj["config"]
     # T2: Precedence CLI > Config. None = Flag nicht gesetzt → Config-Wert.
     effective_no_calib = no_calib if no_calib is not None else cfg.no_calib
-    
+
     logger.info("cli.process.start", target=str(target_path), preset=preset)
-    
+
     # Resolve target directory
     target_dir = target_path.resolve()
     target_name = target_dir.name
@@ -606,7 +608,7 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
         if result["status"] == "Warning":
             click.echo("[WARNING] Pre-Flight Warnungen — starte trotzdem (--yes)", err=True)
         # bei OK oder Warning + --yes: faellt durch zur Pipeline
-    
+
     # Determine preset
     if not preset:
         # Try to infer from target name
@@ -640,7 +642,6 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
 
     # V1.8-0 (MALVAR): Debayer-Methode aufloesen.
     # Precedence: CLI > Config > Default "superpixel".
-    from .config.loader import resolve_stack_scale_factor
     import warnings
     effective_debayer_method = debayer_method or cfg.debayer_method or "superpixel"
     pipeline.processing_params.debayer_method = effective_debayer_method
@@ -817,6 +818,7 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
     # V19-PCC-FLAG P1/P2/P3: --pcc/--no-pcc Preset-Step Mutation (CLI > Config > Preset)
     try:
         import copy
+
         from .config.models import PipelineStep
         pcc_enabled = None
         if pcc is not None:
@@ -884,7 +886,7 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
                     amount=step.params.get("amount"),
                 )
                 break
-    
+
     # Work in timestamped generated/ subdirectory (preserves all runs)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     working_dir = target_dir / "generated" / timestamp
@@ -951,7 +953,10 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
         # V19-REG-SMART E3: Priority Chain recompute after Discovery (header available)
         # Resolve registration via new 5-param resolver (CLI > Profil > Auto-Detect > Config > fft hardcode)
         try:
-            from .config.loader import resolve_registration_config, _detect_equipment_from_header  # type: ignore
+            from .config.loader import (  # type: ignore
+                _detect_equipment_from_header,
+                resolve_registration_config,
+            )
             from .core.equipment import detect_mount_type as _dt_for_e3  # type: ignore
             _e3_header = None
             _e3_exptimes: list[float] = []
@@ -1126,7 +1131,7 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
             click.echo(f"\nMulti-Group: {len(groups)} groups found")
             if groups:
                 # V1.7-1 FSM-C1/C3: Dry-run Transparenz — Filter-Liste + Kandidat/excluded je Gruppe
-                from .config.loader import resolve_merge_filters, is_merge_filter_match
+                from .config.loader import is_merge_filter_match, resolve_merge_filters
                 _eff_filters = resolve_merge_filters(ctx.obj["config"], cli_filters=merge_filter)
                 # Tippfehler-Warning (AC-C3) — Filterwert matcht keine Gruppe
                 if _eff_filters is not None:
@@ -1356,7 +1361,7 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
         )
 
         logger.info("phase.processing.complete", stacked=proc_result.stacked is not None)
-        
+
         # Phase 5: Archive
         logger.info("phase.archive.start")
         archive_agent = create_archive_agent(out_dir, cfg)
@@ -1370,7 +1375,7 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
             multi_group_metadata=proc_result.multi_group_metadata if hasattr(proc_result, 'multi_group_metadata') else None,
         )
         logger.info("phase.archive.complete", output=str(archive_result.output_dir))
-        
+
         # Summary
         click.echo(f"\n[OK] Processing complete: {target_name}")
         if effective_no_calib:
@@ -1384,7 +1389,7 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
             )
             if preview.exists():
                 click.echo(f"   Preview: {preview.name} (auto-stretched, {preview.stat().st_size // 1024} KB)")
-        
+
     except Exception as e:
         logger.error("cli.process.failed", error=str(e), exc_info=True)
         raise click.ClickException(f"Processing failed: {e}")
@@ -1398,10 +1403,10 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
 def batch(ctx, data_root, preset, dry_run):
     """Process all subdirectories in data root."""
     cfg: AppConfig = ctx.obj["config"]
-    
+
     targets = [d for d in Path(data_root).iterdir() if d.is_dir()]
     click.echo(f"Found {len(targets)} targets")
-    
+
     for target in targets:
         click.echo(f"\n--- Processing {target.name} ---")
         ctx.invoke(process, target_path=target, preset=preset, dry_run=dry_run)
@@ -2143,10 +2148,13 @@ def inspect(ctx, target_path, as_json, eqmode, frames, quality):
 
         # V1.7-2 FSEL-D2: Frame-Selection Vorschau je Gruppe (Prospective, ohne vorherigen Lauf).
         # Best-effort Scoring falls Bilddaten lesbar, sonst nur Config-Erwartung (total/keep/discard).
+        import math as _math
+
         from .agents.discovery import create_discovery_agent as _create_da
         from .config.loader import resolve_frame_selection as _resolve_fs
-        from .core.quality import FrameQuality as _FQ, compute_frame_score as _cfs, compute_frame_quality as _cfq
-        import math as _math
+        from .core.quality import FrameQuality as _FQ
+        from .core.quality import compute_frame_quality as _cfq
+        from .core.quality import compute_frame_score as _cfs
         _pipeline_for_fs = ctx.obj["config"].get_preset(ctx.obj["config"].default_preset) or ctx.obj["config"].get_preset_for_target(context.target.target_type.value)
         try:
             _effective_fs_json = _resolve_fs(ctx.obj["config"], _pipeline_for_fs)
@@ -2172,7 +2180,6 @@ def inspect(ctx, target_path, as_json, eqmode, frames, quality):
             _score_min_j = _score_max_j = _score_median_j = None
             if _effective_fs_json.enabled and _total_j >= 2:
                 try:
-                    import numpy as _np
                     # Frames dieser Gruppe aus Context filtern (group_by_params Logik)
                     _group_frames_j = []
                     for _f in lights.frames:
@@ -2358,7 +2365,7 @@ def inspect(ctx, target_path, as_json, eqmode, frames, quality):
             click.echo(f"  {f.path.name}: OK")
 
     # V1.6-1 (SSOT-C5): Aktive Filename-Patterns anzeigen
-    click.echo(f"\nFilename-Patterns: hardcoded Defaults aktiv")
+    click.echo("\nFilename-Patterns: hardcoded Defaults aktiv")
 
     # V1.6-2 (AC-BIL-C3): Debayer-Methode anzeigen
     effective_debayer = cfg.debayer_method or "superpixel"
@@ -2384,10 +2391,13 @@ def inspect(ctx, target_path, as_json, eqmode, frames, quality):
 
     # V1.7-2 FSEL-D2: Selektions-Statistik je Gruppe (Frames total, behalten, verworfen, Perzentil, Score-Spanne)
     try:
+        import math as _math2
+
         from .agents.discovery import create_discovery_agent as _cda2
         from .config.loader import resolve_frame_selection as _rfs2
-        from .core.quality import compute_frame_quality as _cfq2, compute_frame_score as _cfs2, FrameQuality as _FQ2
-        import math as _math2
+        from .core.quality import FrameQuality as _FQ2
+        from .core.quality import compute_frame_quality as _cfq2
+        from .core.quality import compute_frame_score as _cfs2
         _pipeline_for_fs2 = cfg.get_preset(cfg.default_preset) or cfg.get_preset_for_target(context.target.target_type.value)
         try:
             _eff_fs2 = _rfs2(cfg, _pipeline_for_fs2)
@@ -2470,8 +2480,8 @@ def inspect(ctx, target_path, as_json, eqmode, frames, quality):
     if quality:
         # QF-Metriken explizit (ergaenzt Frame-Selection)
         try:
+
             from .core.quality import compute_frame_quality as _cfq_q
-            import numpy as _np
             # Sample first 3 lights for QF
             for f in lights.frames[:3]:
                 try:
@@ -2843,8 +2853,11 @@ def doctor(ctx, target_path, fix):
                 f"Python {sys.version_info[0]}.{sys.version_info[1]} < 3.11 (kritisch)")
 
     # 2. Core-Dependencies (kritisch)
+    # DEF-008 (Boris-Entscheid 2026-09-02): astroquery ist Base-Dependency,
+    # damit PCC (GAIA/VizieR/APASS) out-of-the-box verfuegbar ist.
     core_deps = ["astropy", "numpy", "scipy", "pydantic",
-                 "pydantic_settings", "click", "structlog", "yaml", "jinja2"]
+                 "pydantic_settings", "click", "structlog", "yaml", "jinja2",
+                 "astroquery"]
     for dep in core_deps:
         try:
             __import__(dep)
@@ -2853,18 +2866,16 @@ def doctor(ctx, target_path, fix):
             _report(f"dep.{dep}", "fail", f"{dep} fehlt (kritisch)")
 
     # 3. Optional-Dependencies (WARN: Feature deaktiviert / Fallback aktiv)
-    # AC-W9-A3: listet ALLE drei W9-A-Dependencies (astroalign, sep,
-    # scikit-image) — nur astroalign zu melden wuerde den Check taeuschen.
+    # AC-W9-A3: listet ALLE drei astroalign-Extra-Dependencies (astroalign,
+    # sep, scikit-image) — nur astroalign zu melden wuerde den Check taeuschen.
     # (name, import_module): Dist-Name fuer Ausgabe, Modul-Name fuer Import
     # (scikit-image -> skimage, dist != module).
     optional_deps = [
-        ("astroquery", "astroquery"),
         ("sep", "sep"),
         ("astroalign", "astroalign"),
         ("scikit-image", "skimage"),
     ]
     optional_dep_messages = {
-        "astroquery": "fehlt (GAIA-PCC deaktiviert / Gray-World-Fallback)",
         "sep": "fehlt (astroalign-Stern-Detection deaktiviert; GAIA-PCC/Gray-World-Fallback aktiv)",
         "astroalign": 'fehlt (W9-Registration im fft-Fallback; Extra: "astra[astroalign]")',
         "scikit-image": "fehlt (W9-Registration im fft-Fallback; Pflicht-Dep astroalign-Extra)",
@@ -3026,7 +3037,6 @@ def doctor(ctx, target_path, fix):
         # sowie Rejection-Status fuer den Trichter-Vergleich (C1: Perzentil → Threshold).
         try:
             from .config.loader import resolve_frame_selection as _rfs_doc
-            from .config.models import FrameSelectionConfig as _FSC_doc
             _preset_doc = cfg.get_preset(cfg.default_preset)
             if _preset_doc is None and cfg.pipeline_presets:
                 _preset_doc = cfg.pipeline_presets[0]

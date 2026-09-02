@@ -25,10 +25,9 @@ Dieses Modul importiert NIE ``processing_agent`` (kein Import-Zyklus).
 
 from __future__ import annotations
 
-import math
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 import structlog
@@ -36,13 +35,17 @@ from astropy.io import fits
 from scipy.ndimage import gaussian_filter
 from scipy.ndimage import shift as scipy_shift
 
-from ..config.models import CFADrizzleConfig, FrameSelectionConfig, MultiGroupConfig, PipelinePreset, PreviewExportConfig
 from ..config.loader import (
     is_merge_filter_match,
     normalize_merge_filters,
     resolve_cfa_drizzle,
     resolve_export_config,
     resolve_preview_export_config,
+)
+from ..config.models import (
+    CFADrizzleConfig,
+    MultiGroupConfig,
+    PipelinePreset,
 )
 from ..core.debayer import debayer_fits
 from ..core.export import annotate_export_header, export_stretched_fits
@@ -51,19 +54,8 @@ from ..core.pcc import compute_pixel_scale, photometric_color_calibration
 from ..core.preview import create_preview_jpg
 from ..core.quality import (
     FrameQuality,
-    compute_frame_score,
     qual_to_dict,
-    reject_outlier_frames,
     summarize_qualities,
-)
-from ..core.selection import (
-    DEFAULT_MIN_CORR_HP,
-    _apply_frame_selection,
-    _apply_selection_and_rejection,
-    _percentile_selection_details,
-    _resolve_frame_selection_config,
-    _resolve_min_corr_hp_config,
-    _resolve_rejection_config,
 )
 from ..core.registration import (
     AstroalignUnavailableError,
@@ -77,6 +69,12 @@ from ..core.registration import (
     create_registration,
     register_frames,
     select_registration_channel,
+)
+from ..core.selection import (
+    _apply_selection_and_rejection,
+    _resolve_frame_selection_config,
+    _resolve_min_corr_hp_config,
+    _resolve_rejection_config,
 )
 from ..core.stacking import stack_frames
 from ..models.core import GroupInfo, ObservationContext, compute_group_hash
@@ -102,7 +100,7 @@ def build_reference_selection(
     strategy: str,
     ref_hash: str,
     group_stacks: dict[str, Path],
-    registration_metrics: Optional[dict[str, dict]] = None,
+    registration_metrics: dict[str, dict] | None = None,
     *,
     logger=None,
 ) -> dict:
@@ -297,8 +295,8 @@ def register_to_reference_stack(
     load_frame,
     save_frame,
     logger=None,
-    params: Optional[dict] = None,
-    eq: Optional[bool] = None,
+    params: dict | None = None,
+    eq: bool | None = None,
 ) -> RegistrationResult:
     """Register a group stack to a reference stack (cross-group, stack-level).
 
@@ -845,14 +843,14 @@ class MultiGroupProcessor:
         # uebernommen (Restaurierung der _last_*-Attribute).
         self.registered_dir = self.working_dir / "03_registered"
         self.stacked_dir = self.working_dir / "04_stacked"
-        self.last_frame_qualities: List[FrameQuality] = []
+        self.last_frame_qualities: list[FrameQuality] = []
         self.last_frame_rejected = 0
         self.last_registration_metrics: dict = {}
         # ray Review Fix 1 (2026-08-21): PCC-Status des MERGED-Pfad-Laufs
         # (pcc_per_group=False). Der Return von _apply_pcc_per_group wurde
         # previously verworfen -> pcc_status blieb "pending" und erreichte
         # agent-log.yaml/run-info.json nie (z.B. rejected_implausible_factors).
-        self.last_merged_pcc_status: Optional[str] = None
+        self.last_merged_pcc_status: str | None = None
 
         # Test-/Hook-Pfad: Der Agent reicht seine (ggf. gepatchten)
         # Methoden durch; die Instanz-Attribute schatten die Klassen-
@@ -871,8 +869,8 @@ class MultiGroupProcessor:
         self,
         groups: dict[str, GroupInfo],
         strategy: str = "largest",
-        group_stacks: Optional[dict[str, Path]] = None,
-        registration_metrics: Optional[dict[str, dict]] = None,
+        group_stacks: dict[str, Path] | None = None,
+        registration_metrics: dict[str, dict] | None = None,
     ) -> str:
         return select_reference_group(
             groups, strategy, group_stacks, registration_metrics,
@@ -885,7 +883,7 @@ class MultiGroupProcessor:
         strategy: str,
         ref_hash: str,
         group_stacks: dict[str, Path],
-        registration_metrics: Optional[dict[str, dict]] = None,
+        registration_metrics: dict[str, dict] | None = None,
     ) -> dict:
         return build_reference_selection(
             groups, strategy, ref_hash, group_stacks,
@@ -899,10 +897,10 @@ class MultiGroupProcessor:
         cross_group_registrations: list[dict],
         ref_hash: str,
         min_correlation: float,
-        group_metadata: Optional[dict] = None,
-        preview_paths: Optional[dict] = None,
-        working_dir: Optional[Path] = None,
-        group_eqmode: Optional[dict] = None,
+        group_metadata: dict | None = None,
+        preview_paths: dict | None = None,
+        working_dir: Path | None = None,
+        group_eqmode: dict | None = None,
         group_avg_rotation: float = 0.0,
     ) -> tuple[dict[str, Path], list[dict]]:
         return apply_cross_group_skip_filter(
@@ -919,8 +917,8 @@ class MultiGroupProcessor:
     def _register_to_reference_stack(
         self, stack_path: Path, ref_stack_path: Path,
         filter_name: str, output_dir: Path,
-        params: Optional[dict] = None,
-        eq: Optional[bool] = None,
+        params: dict | None = None,
+        eq: bool | None = None,
     ) -> RegistrationResult:
         return register_to_reference_stack(
             stack_path, ref_stack_path, filter_name, output_dir,
@@ -935,8 +933,8 @@ class MultiGroupProcessor:
         self, stack_path: Path, context: ObservationContext,
         multi_group_config: MultiGroupConfig, group_dir: Path,
         pixel_scale_arcsec: float = 0.0,
-        ra: Optional[float] = None, dec: Optional[float] = None,
-        group_metadata: Optional[dict] = None,
+        ra: float | None = None, dec: float | None = None,
+        group_metadata: dict | None = None,
     ) -> tuple[Path, str]:
         return apply_pcc_per_group(
             stack_path, context, multi_group_config, group_dir,
@@ -976,7 +974,7 @@ class MultiGroupProcessor:
         calibration_result, debayer_result,
         pipeline: PipelinePreset,
         multi_group_config: MultiGroupConfig,
-        merge_agent: Optional['MergeAgent'] = None,
+        merge_agent: MergeAgent | None = None,
         target_name: str = "",
     ):
         """Multi-Group Pipeline: Discovery → Pass 1 (intra-group) → Pass 2 (cross-group) → PCC → Merge.
@@ -1048,7 +1046,7 @@ class MultiGroupProcessor:
         # (0=AZ, 1=EQ, None=unbekannt; fits_parser liest ihn best effort,
         # Fix-Sammlung v1.3 §2) — Fundament fuer eqmode_majority/
         # eqmode_consistent + Mix-Warnung VOR dem Lauf.
-        eqmode_values_by_group: dict[str, list[Optional[int]]] = {h: [] for h in groups}
+        eqmode_values_by_group: dict[str, list[int | None]] = {h: [] for h in groups}
         if len(lights.frames) != len(input_frames):
             self.logger.warning("multi_group.frame_count_mismatch",
                                 lights=len(lights.frames), inputs=len(input_frames),
@@ -1153,13 +1151,15 @@ class MultiGroupProcessor:
         _per_group_reg_configs: dict[str, dict] = {}
         _cross_group_reg_cfg: dict = {"method": "astroalign", "max_rotation_deg": 20.0, "max_scale_dev": 0.05}
         try:
-            from ..config.loader import resolve_group_registration_configs, get_cross_group_registration_config  # type: ignore
+            from ..config.loader import (  # type: ignore
+                get_cross_group_registration_config,
+                resolve_group_registration_configs,
+            )
             _cli_override = getattr(self.config, "_registration_cli_override", None) if self.config else None  # type: ignore
             # Also fallback to proc_params method if CLI was set via pipeline but attribute missing
             if _cli_override is None:
                 _reg_cli = (proc_params.get("registration", {}) or {}).get("method")
                 # Only treat as CLI override if it differs from config default? Use explicit attribute prefer
-                pass
             # global_equipment attempted from context.equipment (if resolved) — best effort
             _global_equip = None
             try:
@@ -1177,6 +1177,10 @@ class MultiGroupProcessor:
                 groups=frame_groups,
                 cli_override=_cli_override,
                 global_equipment=_global_equip,
+                # DEF-009: EQMODE-Mehrheit aus Original-Light-Headers durchreichen,
+                # damit Zwischen-Dateien ohne EQMODE keine irrefuehrenden
+                # discovery.mount_unknown-Warnungen erzeugen.
+                eqmode_by_group=eqmode_by_group,
             )
             _cross_group_reg_cfg = get_cross_group_registration_config()
             self.logger.info(
@@ -1243,12 +1247,12 @@ class MultiGroupProcessor:
             # ── V1.8-1 CFA-Drizzle (nach QualityGate, vor Debayer) ──
             drizzle_attempted = False
             drizzle_success = False
-            drizzle_stacked: Optional[Path] = None
-            drizzle_meta: Optional[dict] = None
+            drizzle_stacked: Path | None = None
+            drizzle_meta: dict | None = None
             # Per-group overrides: fallback materialization can change the
             # effective input frames (re-debayered CFA) and their scale factor.
             group_is_3d = is_3d
-            group_stack_scale_factor: Optional[float] = None
+            group_stack_scale_factor: float | None = None
             if drz_cfg.enabled:
                 cfa_paths = calibrated_groups.get(group_hash, [])
                 # Guard: is_3d irrelevant for drizzle (needs CFA 2D)
@@ -1256,7 +1260,11 @@ class MultiGroupProcessor:
                 try:
                     drizzle_attempted = True
                     # Quality Gate filtering (nur non-outlier) before drizzle (AC-DRZ-5)
-                    from ..agents.cfa_drizzle_agent import cfa_drizzle, compute_pixfrac, register_cfa_subpixel
+                    from ..agents.cfa_drizzle_agent import (
+                        cfa_drizzle,
+                        compute_pixfrac,
+                        register_cfa_subpixel,
+                    )
                     from ..core.quality import compute_frame_quality, reject_outlier_frames
 
                     # Load CFA frames (float32, 2D)
@@ -1289,10 +1297,14 @@ class MultiGroupProcessor:
                         _eff_rejection = bool(getattr(qg, "rejection_enabled", True)) if qg else True
                         _resolver = None
                         try:
-                            from ..agents.cfa_drizzle_agent import resolve_cfa_drizzle_quality_gate as _resolver  # type: ignore
+                            from ..agents.cfa_drizzle_agent import (
+                                resolve_cfa_drizzle_quality_gate as _resolver,  # type: ignore
+                            )
                         except Exception:
                             try:
-                                from ..core.cfa_drizzle import resolve_cfa_drizzle_quality_gate as _resolver  # type: ignore
+                                from ..core.cfa_drizzle import (
+                                    resolve_cfa_drizzle_quality_gate as _resolver,  # type: ignore
+                                )
                             except Exception:
                                 _resolver = None
                         if _resolver is not None and qg is not None:
@@ -1512,7 +1524,7 @@ class MultiGroupProcessor:
                     continue
 
             # Stacked placeholder for inner try/finally handling
-            stacked: Optional[Path] = None
+            stacked: Path | None = None
             if drizzle_short_circuit:
                 # Drizzle short-circuit: no registration, drizzled master is already stacked
                 stacked = drizzle_stacked  # type: ignore
@@ -1689,7 +1701,7 @@ class MultiGroupProcessor:
             # In-Place ersetzt; die `group_*/04_stacked/`-Struktur bleibt
             # unveraendert. Fehler/Skip (min_samples, 2D) lassen die Gruppe
             # trotzdem weiterlaufen (AC-GR-B3/E1).
-            gr_report: Optional[dict] = None
+            gr_report: dict | None = None
             if stacked and stacked.exists():
                 if _has_step("background_extraction") or _has_step("gradient_removal"):
                     gr_report = self._background_extraction(stacked, _group_proc_params)
@@ -2214,7 +2226,7 @@ class MultiGroupProcessor:
             }) >= 2,
         }
 
-        merged_path: Optional[Path] = None
+        merged_path: Path | None = None
         merge_report: dict = {}
 
         if len(groups) == 1:

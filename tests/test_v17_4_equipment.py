@@ -40,15 +40,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from astro_process.agents.archive import ArchiveAgent  # noqa: E402
 from astro_process.agents.discovery import DiscoveryAgent  # noqa: E402
 from astro_process.cli import cli  # noqa: E402
+from astro_process.config.loader import (  # noqa: E402
+    _detect_equipment_from_header,
+    resolve_group_registration_configs,
+)
 from astro_process.config.models import AppConfig, EquipmentProfile  # noqa: E402
 from astro_process.core.equipment import (  # noqa: E402
     detect_bayer_pattern,
     detect_input_is_rgb,
+    detect_mount_type,
     match_equipment_profile,
     resolve_debayer_factor,
     resolve_equipment,
 )
-from astro_process.core.fits_parser import build_observation_context  # noqa: E402
 from astro_process.core.pcc import compute_pixel_scale  # noqa: E402
 from astro_process.models.core import (  # noqa: E402
     FitsHeader,
@@ -58,7 +62,6 @@ from astro_process.models.core import (  # noqa: E402
     ObservationContext,
     ObservationTarget,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════
 # Helpers (in-memory Contexts — kein FITS-IO noetig)
@@ -88,7 +91,7 @@ def _context(headers: list[FitsHeader], width: int = 1920,
         target=ObservationTarget(name="TestTarget"),
         frames={FrameType.LIGHT: FrameSet(frame_type=FrameType.LIGHT,
                                           frames=frames)},
-        source_path=Path("."),
+        source_path=Path(),
     )
 
 
@@ -361,7 +364,7 @@ def test_ac_b1_resolution_from_first_light_frame():
         target=ObservationTarget(name="TestTarget"),
         frames={FrameType.LIGHT: FrameSet(frame_type=FrameType.LIGHT,
                                           frames=frames)},
-        source_path=Path("."),
+        source_path=Path(),
     )
 
     report = resolve_equipment(ctx, None)
@@ -745,7 +748,7 @@ def test_ac_d3_doctor_with_target_full_headers_ok(tmp_path):
     runner = CliRunner()
     with runner.isolated_filesystem():
         Path("config.yaml").write_text(_default_config_yaml("."), encoding="utf-8")
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
         with patch("astro_process.cli._run_with_timeout",
                    return_value=MagicMock()):
             result = runner.invoke(
@@ -764,7 +767,7 @@ def test_ac_d3_doctor_with_target_lists_missing_fields(tmp_path):
     runner = CliRunner()
     with runner.isolated_filesystem():
         Path("config.yaml").write_text(_default_config_yaml("."), encoding="utf-8")
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
         with patch("astro_process.cli._run_with_timeout",
                    return_value=MagicMock()):
             result = runner.invoke(
@@ -783,10 +786,152 @@ def test_doctor_without_target_still_works(tmp_path):
     runner = CliRunner()
     with runner.isolated_filesystem():
         Path("config.yaml").write_text(_default_config_yaml("."), encoding="utf-8")
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
         with patch("astro_process.cli._run_with_timeout",
                    return_value=MagicMock()):
             result = runner.invoke(cli, ["-c", "config.yaml", "doctor"])
 
     assert result.exit_code in (0, 1), result.output
     assert "Doctor:" in result.output
+
+
+# ═══════════════════════════════════════════════════════════════════
+# DEF-009 (a): EQMODE hat Vorrang vor Profil-/TELESCOP-Heuristik
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestMountTypeEqmodePriority:
+    """DEF-009: Mount-Type-Erkennung muss EQMODE-Header vor dem Profil/
+    TELESCOP-Heuristik bevorzugen, damit run-info eq/eq_source und die
+    gemountete mount_type-Logik konsistent bleiben."""
+
+    def test_detect_mount_type_eqmode_eq_overrides_az_telescop(self):
+        """EQMODE=1 (EQ) + TELESCOP=DWARF MINI -> mount_type eq."""
+        header = fits.Header()
+        header["TELESCOP"] = "DWARF MINI"
+        header["EQMODE"] = 1
+        assert detect_mount_type(header) == "eq"
+
+    def test_detect_mount_type_eqmode_az_overrides_eq_telescop(self):
+        """EQMODE=0 (AZ) + sonst EQ-Header -> mount_type az."""
+        header = fits.Header()
+        header["TELESCOP"] = "EQ MOUNT"
+        header["EQMODE"] = 0
+        assert detect_mount_type(header) == "az"
+
+    def test_detect_mount_type_falls_back_to_telescop_without_eqmode(self):
+        """Ohne EQMODE greift die TELESCOP-Heuristik (DWARF MINI -> az)."""
+        header = fits.Header()
+        header["TELESCOP"] = "DWARF MINI"
+        assert detect_mount_type(header) == "az"
+
+    def test_detect_mount_type_unknown_warning_only_without_eqmode(self, capfd):
+        """Default-EQ-Warnung nur wenn EQMODE UND TELESCOP fehlen.
+
+        structlog schreibt nach stdout, nicht in das Python-Logging;
+        deshalb stdout pruefen (capfd).
+        """
+        header = fits.Header()
+        result = detect_mount_type(header)
+        captured = capfd.readouterr()
+        assert result == "eq"
+        assert "discovery.mount_unknown" in captured.out
+
+    def test_detect_mount_type_no_warning_with_eqmode(self, capfd):
+        """Wenn EQMODE vorhanden ist, darf keine Default-EQ-Warnung kommen."""
+        header = fits.Header()
+        header["EQMODE"] = 1
+        detect_mount_type(header)
+        captured = capfd.readouterr()
+        assert "discovery.mount_unknown" not in captured.out
+
+    def test_detect_equipment_from_header_eqmode_overrides_profile(self):
+        """Profil dwarf_mini sagt az, aber EQMODE=1 -> zurueckgeliefertes
+        mount_type ist eq."""
+        header = fits.Header()
+        header["TELESCOP"] = "DWARF MINI"
+        header["EQMODE"] = 1
+        cfg = AppConfig(
+            equipment_profiles=[
+                EquipmentProfile(
+                    name="dwarf_mini",
+                    telescope="Dwarf Mini",
+                    mount_type="az",
+                    preferred_registration="astroalign",
+                    max_rotation_deg=15.0,
+                    max_exptime_fft_warn=45.0,
+                ),
+            ]
+        )
+        result = _detect_equipment_from_header(header, cfg)
+        assert result["mount_type"] == "eq"
+        # preferred_registration bleibt vom Profil.
+        assert result["preferred_registration"] == "astroalign"
+
+    def test_detect_equipment_from_header_profile_az_without_eqmode(self):
+        """Ohne EQMODE bleibt das Profil-mount_type az erhalten."""
+        header = fits.Header()
+        header["TELESCOP"] = "DWARF MINI"
+        cfg = AppConfig(
+            equipment_profiles=[
+                EquipmentProfile(
+                    name="dwarf_mini",
+                    telescope="Dwarf Mini",
+                    mount_type="az",
+                    preferred_registration="astroalign",
+                ),
+            ]
+        )
+        result = _detect_equipment_from_header(header, cfg)
+        assert result["mount_type"] == "az"
+
+    def test_resolve_group_configs_eqmode_by_group_overrides_blank_header(
+        self, tmp_path: Path, capfd,
+    ):
+        """DEF-009: eqmode_by_group (aus Original-Light-Headers) verhindert
+        discovery.mount_unknown-Warnung, wenn die Zwischen-Datei im
+        group-dict weder TELESCOP noch EQMODE hat."""
+        import numpy as np
+
+        group_dir = tmp_path / "group"
+        group_dir.mkdir(parents=True, exist_ok=True)
+        # Zwischen-Datei ohne TELESCOP/EQMODE (simuliert debayered/calibrated)
+        blank_path = group_dir / "light.fits"
+        fits.PrimaryHDU(np.zeros((8, 8), dtype=np.float32)).writeto(
+            blank_path, overwrite=True
+        )
+        cfg = AppConfig(equipment_profiles=[])
+        groups = {"60s40": [blank_path]}
+        eqmode_by_group = {
+            "60s40": {"majority": 1, "consistent": True, "counts": {"0": 0, "1": 6, "None": 0}},
+        }
+        result = resolve_group_registration_configs(
+            cfg=cfg,
+            groups=groups,
+            eqmode_by_group=eqmode_by_group,
+        )
+        assert result["60s40"]["method"] == "fft"  # kein Profil, EQ >120s? exptime=0
+        captured = capfd.readouterr()
+        assert "discovery.mount_unknown" not in captured.out
+
+    def test_resolve_group_configs_falls_back_to_detect_without_eqmode_hint(
+        self, tmp_path: Path, capfd,
+    ):
+        """Ohne eqmode_by_group-Hinweis greift die Header-Heuristik (hier:
+        leerer Header -> Default EQ + Warnung)."""
+        import numpy as np
+
+        group_dir = tmp_path / "group"
+        group_dir.mkdir(parents=True, exist_ok=True)
+        blank_path = group_dir / "light.fits"
+        fits.PrimaryHDU(np.zeros((8, 8), dtype=np.float32)).writeto(
+            blank_path, overwrite=True
+        )
+        cfg = AppConfig(equipment_profiles=[])
+        result = resolve_group_registration_configs(
+            cfg=cfg,
+            groups={"60s40": [blank_path]},
+        )
+        assert "60s40" in result
+        captured = capfd.readouterr()
+        assert "discovery.mount_unknown" in captured.out

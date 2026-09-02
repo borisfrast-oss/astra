@@ -32,9 +32,22 @@ try:
 except ImportError:  # pragma: no cover - tests run from repo root
     fits = None  # type: ignore[assignment]
 
+# Refactor 2026-08-14 (Cluster 3): registrations-Intra-Group-Tests rufen die
+# core-Funktion ueber den gemeinsamen Helper (test_registration) — er setzt
+# auch die _last_*-Attribute wie ProcessingAgent.run/process_multi_group.
+from test_registration import (  # noqa: E402
+    _make_agent,
+    _register_frames,
+    _write_2d_frame,
+)
+
 import astro_process.agents.archive as archive_mod  # noqa: E402
+
+# V1.5-4 CD-Matrix-Semantik (ehemals test_v15_4_cd_matrix_semantik.py)
+import astro_process.agents.multi_group_agent as multi_group_agent  # noqa: E402
 import astro_process.agents.processing_agent as processing_agent_mod  # noqa: E402
 import astro_process.core.registration as registration_mod  # noqa: E402
+from astro_process.agents.archive import ArchiveAgent  # noqa: E402
 from astro_process.agents.merge_agent import MergeAgent  # noqa: E402
 from astro_process.agents.processing_agent import (  # noqa: E402
     ProcessingAgent,
@@ -48,19 +61,6 @@ from astro_process.config.models import (  # noqa: E402
     PipelineStep,
     ProcessingParams,
 )
-
-# Refactor 2026-08-14 (Cluster 3): registrations-Intra-Group-Tests rufen die
-# core-Funktion ueber den gemeinsamen Helper (test_registration) — er setzt
-# auch die _last_*-Attribute wie ProcessingAgent.run/process_multi_group.
-from test_registration import (  # noqa: E402
-    _make_agent,
-    _register_frames,
-    _write_2d_frame,
-)
-
-# V1.5-4 CD-Matrix-Semantik (ehemals test_v15_4_cd_matrix_semantik.py)
-import astro_process.agents.multi_group_agent as multi_group_agent  # noqa: E402
-from astro_process.agents.archive import ArchiveAgent  # noqa: E402
 
 SHAPE = (128, 128)
 # Positiver degree-2-Gradient (Synthetik-Konvention: nie negativ auf
@@ -682,6 +682,112 @@ class TestQualityReports:
         assert log["processing"]["registration_metrics"]["corr_hp"]["median"] == 0.72
         assert log["processing"]["registration_metrics"]["n_control_points"]["median"] == 15.0
 
+    def test_agent_log_registered_frames_from_registration_metrics(self, tmp_path: Path):
+        """DEF-009 (b): agent-log.yaml processing.registered_frames muss aus
+        registration_metrics.frames_registered kommen (Quelle der Wahrheit),
+        nicht aus der reinen Laenge von proc_result.registered_frames."""
+        import yaml
+
+        output_dir = tmp_path / "out"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        context = SimpleNamespace(
+            target=SimpleNamespace(
+                name="TestTarget",
+                target_type=SimpleNamespace(value="galaxy"),
+            ),
+            total_integration_time=60.0,
+            total_light_frames=6,
+            calibration=SimpleNamespace(
+                dark_count=0, flat_count=0, bias_count=0
+            ),
+        )
+        calibration_result = SimpleNamespace(
+            master_dark=None, calibrated_lights=["a.fits"] * 6,
+        )
+        debayer_result = SimpleNamespace(debayered_frames=["a.fits"] * 6)
+        reg_metrics = {
+            "method_counts": {"astroalign": 6},
+            "frames_total": 6,
+            "frames_registered": 6,
+        }
+        proc_result = SimpleNamespace(
+            # registered_frames leer simuliert das beobachtete Symptom,
+            # registration_metrics enthaelt aber die korrekte Anzahl.
+            registered_frames=[],
+            stacked=Path("/tmp/stacked.fits"),
+            exports=[Path("/tmp/out.fits")],
+            multi_group_metadata=None,
+            frame_qualities=[],
+            stack_quality=None,
+            registration_metrics=reg_metrics,
+        )
+
+        agent = archive_mod.ArchiveAgent(output_root=output_dir, config=None)
+        log_path = agent._create_agent_log(
+            output_dir, context, proc_result, calibration_result,
+            debayer_result=debayer_result,
+        )
+        log = yaml.safe_load(log_path.read_text(encoding="utf-8"))
+        assert log["processing"]["registered_frames"] == 6
+        assert log["processing"]["registered_frames"] == reg_metrics["frames_registered"]
+
+    def test_agent_log_registered_frames_multi_group_sum(self, tmp_path: Path):
+        """DEF-009 (b): Multi-Group-Modus -> registered_frames ist die Summe
+        ueber die Gruppen-Metriken, da top-level registration_metrics nur
+        noch das aggregierte multi_group-Dict enthaelt."""
+        import yaml
+
+        output_dir = tmp_path / "out"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        context = SimpleNamespace(
+            target=SimpleNamespace(
+                name="TestTarget",
+                target_type=SimpleNamespace(value="galaxy"),
+            ),
+            total_integration_time=120.0,
+            total_light_frames=10,
+            calibration=SimpleNamespace(
+                dark_count=0, flat_count=0, bias_count=0
+            ),
+        )
+        calibration_result = SimpleNamespace(
+            master_dark=None, calibrated_lights=["a.fits"] * 10,
+        )
+        debayer_result = SimpleNamespace(debayered_frames=["a.fits"] * 10)
+        multi_group_metadata = {
+            "groups": {
+                "60s40_Astro": {
+                    "frame_count": 6,
+                    "registration_metrics": {"frames_registered": 6},
+                },
+                "30s40_Astro": {
+                    "frame_count": 4,
+                    "registration_metrics": {"frames_registered": 4},
+                },
+            },
+            "method": "weighted_average",
+        }
+        proc_result = SimpleNamespace(
+            # Multi-Group: top-level registered_frames ist typischerweise leer.
+            registered_frames=[],
+            stacked=Path("/tmp/stacked.fits"),
+            exports=[Path("/tmp/out.fits")],
+            multi_group_metadata=multi_group_metadata,
+            frame_qualities=[],
+            stack_quality=None,
+            # Top-level registration_metrics ist das aggregierte Multi-Group-Dict.
+            registration_metrics={"mode": "multi_group", "groups": {}},
+        )
+
+        agent = archive_mod.ArchiveAgent(output_root=output_dir, config=None)
+        log_path = agent._create_agent_log(
+            output_dir, context, proc_result, calibration_result,
+            debayer_result=debayer_result,
+            multi_group_metadata=multi_group_metadata,
+        )
+        log = yaml.safe_load(log_path.read_text(encoding="utf-8"))
+        assert log["processing"]["registered_frames"] == 10
+
     def test_agent_log_legacy_result_no_registration_metrics(self, tmp_path: Path):
         """V1.3-3: Ohne registration_metrics-Feld (alter proc_result/Mock)
         bleibt das agent-log valide: processing.registration_metrics == {}
@@ -1098,7 +1204,7 @@ class TestQualityReports:
                 dark_count=0, flat_count=0, bias_count=0
             ),
             get_lights=SimpleNamespace(
-                group_by_params=lambda: {}
+                group_by_params=dict
             ),
         )
         proc_result = SimpleNamespace(
@@ -1140,7 +1246,7 @@ class TestQualityReports:
                 dark_count=0, flat_count=0, bias_count=0
             ),
             get_lights=SimpleNamespace(
-                group_by_params=lambda: {}
+                group_by_params=dict
             ),
         )
         # Legacy: kein pcc_status

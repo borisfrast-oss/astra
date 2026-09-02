@@ -27,7 +27,7 @@ bleibt Sache des Exports (F-META-1.2, unveraendert).
 from __future__ import annotations
 
 from collections import Counter
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -40,7 +40,7 @@ logger = structlog.get_logger(__name__)
 # EQPT-A: aufgeloeste Felder -> FitsHeader-Attribut(e). pixel_size_um nutzt
 # primaer XPIXSZ (pixel_size_x); YPIXSZ dient als expliziter Fallback
 # (quadratische Pixel: identisch, aber nicht jede Firmware schreibt beide).
-EQUIPMENT_FIELD_HEADERS: Dict[str, Tuple[str, ...]] = {
+EQUIPMENT_FIELD_HEADERS: dict[str, tuple[str, ...]] = {
     "pixel_size_um": ("pixel_size_x", "pixel_size_y"),
     "focal_length_mm": ("focal_length",),
     "aperture_mm": ("aperture",),
@@ -50,7 +50,7 @@ EQUIPMENT_FIELD_HEADERS: Dict[str, Tuple[str, ...]] = {
 
 # EQPT-C: Bayer-Pattern Header-Keys (best effort, AC-EQPT-C4). Kein Treffer
 # -> RGGB-Annahme (heutiges Verhalten, debayer_superpixel ist layout-fix).
-BAYER_PATTERN_HEADER_KEYS: Tuple[str, ...] = (
+BAYER_PATTERN_HEADER_KEYS: tuple[str, ...] = (
     "BAYERPAT", "BAYER_PAT", "CFA_PATTERN",
 )
 
@@ -65,12 +65,28 @@ AZ_DEVICES = ["DWARF MINI", "DWARF II", "SEESTAR", "ZWO ASIAIR", "SMARTTELESCOPE
 
 
 def detect_mount_type(header: Any) -> str:
-    """V19-REG-SMART R2: Mount-Typ aus FITS-Header ableiten.
+    """V19-REG-SMART R2 + DEF-009: Mount-Typ aus FITS-Header ableiten.
 
-    Prueft EQUAT/MOUNT/TELESCOP auf AZ-Signale. Liefert "az" bei
-    Treffer, sonst "eq" (Fallback) + Warning `discovery.mount_unknown`
-    (OQ-REG-3, konservativ).
+    EQMODE hat Vorrang (0=AZ, 1=EQ), da es die zentrale, frame-eigene
+    Aufnahmemodus-Quelle ist (v13-6-eq-flag-quelle.md). Erst wenn EQMODE
+    fehlt, wird EQUAT/MOUNT/TELESCOP auf AZ-Signale geprueft. Liefert "az"
+    bei Treffer, sonst "eq" (Fallback) + Warning `discovery.mount_unknown`
+    (OQ-REG-3, konservativ) — aber nur wenn auch EQMODE fehlt.
     """
+    # DEF-009: EQMODE gewinnt gegen Profil-/TELESCOP-Heuristik.
+    eq_mode = None
+    if header is not None:
+        try:
+            eq_mode = header.get("EQMODE", None)
+            if eq_mode is not None:
+                eq_mode = int(eq_mode)
+        except Exception:
+            eq_mode = None
+    if eq_mode == 0:
+        return "az"
+    if eq_mode == 1:
+        return "eq"
+
     try:
         equat = str(header.get("EQUAT", "") if header is not None else "").upper()
     except Exception:
@@ -99,14 +115,21 @@ def detect_mount_type(header: Any) -> str:
     return "eq"
 
 
-def detect_preferred_registration(header: Any, exptimes: list[float] | None) -> str:
+def detect_preferred_registration(
+    header: Any, exptimes: list[float] | None, mount_type: str | None = None
+) -> str:
     """V19-REG-SMART R2: Bevorzugte Registrations-Methode aus Header + Belichtung.
 
     Spec-Code (stella OQ-REG-1): AZ immer astroalign (robust), EQ >120s
     astroalign sonst fft. rotation_fft bleibt waehlbar via Profil, aber nicht
     Auto-Default.
+
+    DEF-009: Optionaler mount_type-Override verhindert, dass die Methode
+    erneut aus dem Header abgeleitet werden muss, wenn EQMODE bereits
+    bekannt ist (vermeidet doppelte discovery.mount_unknown-Warnungen).
     """
-    mount_type = detect_mount_type(header)
+    if mount_type is None:
+        mount_type = detect_mount_type(header)
     max_exptime = max(exptimes) if exptimes else 0
     try:
         max_exptime = float(max_exptime)
@@ -130,7 +153,7 @@ def detect_preferred_registration(header: Any, exptimes: list[float] | None) -> 
 # ── Majority ueber alle Lights (AC-EQPT-A2) ─────────────────────────────
 
 
-def _majority(values: list) -> Tuple[Optional[Any], bool]:
+def _majority(values: list) -> tuple[Any | None, bool]:
     """Mehrheitswert aus einer Wertliste (None-Werte ignoriert).
 
     Deterministisch: meisten Vorkommen gewinnt; Tie-Break = erste
@@ -148,10 +171,10 @@ def _majority(values: list) -> Tuple[Optional[Any], bool]:
     return best, len(counts) > 1
 
 
-def _collect_header_values(context: "ObservationContext") -> Dict[str, dict]:
+def _collect_header_values(context: ObservationContext) -> dict[str, dict]:
     """Sammelt je Equipment-Feld den Majority-Wert ueber alle Light-Headers."""
     lights = context.get_lights().frames
-    result: Dict[str, dict] = {}
+    result: dict[str, dict] = {}
     for field, header_attrs in EQUIPMENT_FIELD_HEADERS.items():
         for attr in header_attrs:
             values = [
@@ -174,7 +197,7 @@ def _collect_header_values(context: "ObservationContext") -> Dict[str, dict]:
 # ── Config-Profil-Matching (OQ-EQPT-1 Option A) ──────────────────────────
 
 
-def _profile_value(profile: Any, field: str) -> Optional[Any]:
+def _profile_value(profile: Any, field: str) -> Any | None:
     """Config-Profilwert oder None bei Platzhalter-Defaults.
 
     EquipmentProfile definiert Defaults fuer JEDES Feld (telescope="Unknown",
@@ -199,9 +222,9 @@ def _profile_value(profile: Any, field: str) -> Optional[Any]:
 
 
 def match_equipment_profile(
-    context: "ObservationContext",
-    config: Optional["AppConfig"],
-) -> Tuple[Optional[Any], Optional[str]]:
+    context: ObservationContext,
+    config: AppConfig | None,
+) -> tuple[Any | None, str | None]:
     """Waehlt das Config-Equipment-Profil nach OQ-EQPT-1 (Option A).
 
     Matching ueber INSTRUME (instrument/camera) und TELESCOP der Light-
@@ -233,7 +256,7 @@ def match_equipment_profile(
                 if v and v not in header_strings:
                     header_strings.append(v)
 
-    best: Optional[Tuple[Tuple[int, int], Any, str]] = None
+    best: tuple[tuple[int, int], Any, str] | None = None
     for s in header_strings:
         s_lower = s.lower()
         for profile in profiles:
@@ -282,7 +305,7 @@ def _values_differ(header_val: Any, config_val: Any) -> bool:
 # ── EQPT-B/C: Resolution + Bayer-Pattern ────────────────────────────────
 
 
-def _resolve_resolution(context: "ObservationContext") -> Dict[str, Optional[int]]:
+def _resolve_resolution(context: ObservationContext) -> dict[str, int | None]:
     """EQPT-B: Aufloesung aus NAXIS1/NAXIS2 des ersten Light-Frames.
 
     FrameInfo.width/height sind bereits die Bildachsen (scan_directory
@@ -300,8 +323,8 @@ def _resolve_resolution(context: "ObservationContext") -> Dict[str, Optional[int
 
 
 def detect_bayer_pattern(
-    context: "ObservationContext",
-) -> Tuple[Optional[str], str]:
+    context: ObservationContext,
+) -> tuple[str | None, str]:
     """EQPT-C (AC-EQPT-C4): Bayer-Pattern best effort aus dem Header.
 
     Durchsucht die Raw-Cards der Light-Headers (erster Treffer) nach
@@ -327,7 +350,7 @@ def detect_bayer_pattern(
     return None, "assumed"
 
 
-def detect_input_is_rgb(context: "ObservationContext") -> bool:
+def detect_input_is_rgb(context: ObservationContext) -> bool:
     """True, wenn die Lights bereits RGB (NAXIS=3) sind (z.B. --no-calib
     mit debayerten Lights). Best effort ueber die NAXIS-Rohkarten."""
     for f in context.get_lights().frames:
@@ -348,10 +371,10 @@ def detect_input_is_rgb(context: "ObservationContext") -> bool:
 
 def resolve_debayer_factor(
     debayer_method: str = "superpixel",
-    explicit_value: Optional[float] = None,
-    preset_value: Optional[float] = None,
+    explicit_value: float | None = None,
+    preset_value: float | None = None,
     input_is_rgb: bool = False,
-) -> Tuple[float, str]:
+) -> tuple[float, str]:
     """Debayer-/Stack-Skalierungs-Faktor mit finaler Precedence.
 
     OQ-EQPT-3 (Beschluss Boris, Option A; Fix B2 ray-Review 2026-08-23):
@@ -390,8 +413,8 @@ def resolve_debayer_factor(
 
 
 def resolve_equipment(
-    context: "ObservationContext",
-    config: Optional["AppConfig"],
+    context: ObservationContext,
+    config: AppConfig | None,
 ) -> dict:
     """Fuellt ``context.equipment`` nach der Prioritaets-Kette je Feld.
 

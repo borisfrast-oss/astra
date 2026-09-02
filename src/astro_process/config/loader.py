@@ -3,7 +3,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 import structlog
 import yaml
@@ -12,7 +12,6 @@ from .models import (
     AppConfig,
     CFADrizzleConfig,
     CFADrizzleQualityGateConfig,
-    CosmeticCorrectionConfig,
     ExportConfig,
     FrameSelectionConfig,
     GradientRemovalConfig,
@@ -517,7 +516,7 @@ def _warn_deprecated_profiles(cfg: AppConfig) -> None:
             )
 
 
-def load_config(config_path: Optional[Path] = None) -> AppConfig:
+def load_config(config_path: Path | None = None) -> AppConfig:
     """Load configuration with layering.
 
     Quelle (Precedence, Leo-Auftrag 2026-08-11 B1):
@@ -543,7 +542,7 @@ def load_config(config_path: Optional[Path] = None) -> AppConfig:
 
     if config_path is not None:
         if config_path.exists():
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 user_config = yaml.safe_load(f) or {}
             user_config = _expand_config_values(user_config)
             logger.info("config.loaded_from", source="explicit", path=str(config_path))
@@ -565,7 +564,7 @@ def load_config(config_path: Optional[Path] = None) -> AppConfig:
         ("pipeline_root", _pipeline_root() / "config.yaml"),
     ):
         if candidate.is_file():
-            with open(candidate, "r", encoding="utf-8") as f:
+            with open(candidate, encoding="utf-8") as f:
                 user_config = yaml.safe_load(f) or {}
             user_config = _expand_config_values(user_config)
             logger.info("config.loaded_from", source=source, path=str(candidate))
@@ -604,7 +603,7 @@ def load_preset(name: str) -> PipelinePreset:
     """Load a pipeline preset by name."""
     preset_file = PRESET_CONFIGS_DIR / f"pipeline_{name}.yaml"
     if preset_file.exists():
-        with open(preset_file, "r", encoding="utf-8") as f:
+        with open(preset_file, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         return PipelinePreset(**data)
     raise ValueError(f"Preset '{name}' not found at {preset_file}")
@@ -1059,7 +1058,7 @@ def resolve_cfa_drizzle(
     )
 
 
-def normalize_merge_filters(filters: Optional[list[str]]) -> Optional[list[str]]:
+def normalize_merge_filters(filters: list[str] | None) -> list[str] | None:
     """V1.7-1 FSM-A (AC-FSM-A2, OQ-FSM-2 A): Filter-Liste normalisieren.
 
     Normalisierung: strip + lower (case-insensitive, getrimmt) je Eintrag.
@@ -1087,8 +1086,8 @@ def normalize_merge_filters(filters: Optional[list[str]]) -> Optional[list[str]]
 
 
 def is_merge_filter_match(
-    filter_value: Optional[str],
-    normalized_filters: Optional[list[str]],
+    filter_value: str | None,
+    normalized_filters: list[str] | None,
 ) -> bool:
     """V1.7-1 FSM-A: Prueft ob ein Gruppen-FILTER zur Auswahl passt.
 
@@ -1130,18 +1129,40 @@ def _normalize_equipment_dict(equipment) -> dict | None:
         d: dict = {}
         # Only populate if attributes exist; Pydantic profile always has these
         if hasattr(equipment, "preferred_registration"):
-            d["preferred_registration"] = getattr(equipment, "preferred_registration")
+            d["preferred_registration"] = equipment.preferred_registration
         if hasattr(equipment, "max_rotation_deg"):
-            d["max_rotation_deg"] = getattr(equipment, "max_rotation_deg")
+            d["max_rotation_deg"] = equipment.max_rotation_deg
         if hasattr(equipment, "max_exptime_fft_warn"):
-            d["max_exptime_fft_warn"] = getattr(equipment, "max_exptime_fft_warn")
+            d["max_exptime_fft_warn"] = equipment.max_exptime_fft_warn
         if hasattr(equipment, "mount_type"):
-            d["mount_type"] = getattr(equipment, "mount_type")
+            d["mount_type"] = equipment.mount_type
         if hasattr(equipment, "name"):
-            d["name"] = getattr(equipment, "name")
+            d["name"] = equipment.name
         return d if d else None
     except Exception:
         return None
+
+
+def _mount_type_from_eqmode(header) -> str | None:
+    """DEF-009: EQMODE-basierter Mount-Typ hat Vorrang vor Profil-Heuristik.
+
+    Returns "az" fuer EQMODE=0, "eq" fuer EQMODE=1, None wenn EQMODE fehlt
+    oder nicht interpretierbar ist.
+    """
+    if header is None:
+        return None
+    try:
+        eq_mode = header.get("EQMODE", None)
+        if eq_mode is None:
+            return None
+        eq_mode = int(eq_mode)
+    except Exception:
+        return None
+    if eq_mode == 0:
+        return "az"
+    if eq_mode == 1:
+        return "eq"
+    return None
 
 
 def _detect_equipment_from_header(header, cfg) -> dict:
@@ -1151,6 +1172,9 @@ def _detect_equipment_from_header(header, cfg) -> dict:
     substring, longest wins via simple loop). Fallback hardcoded dwarf_mini AZ.
     Returns dict with preferred_registration, max_rotation_deg, max_exptime_fft_warn,
     mount_type, name — or {} if no match.
+
+    DEF-009: EQMODE ueberschreibt das Profil-mount_type (0=az, 1=eq), damit
+    Header-Wissen nicht vom Profil ueberschrieben wird.
     """
     if header is None or cfg is None:
         return {}
@@ -1163,7 +1187,6 @@ def _detect_equipment_from_header(header, cfg) -> dict:
         return {}
     profiles = list(getattr(cfg, "equipment_profiles", None) or [])
     # Prefer exact/longest substring match (simplified vs. match_equipment_profile)
-    best = None
     best_len = -1
     best_profile = None
     t_lower = telescop.lower()
@@ -1183,8 +1206,9 @@ def _detect_equipment_from_header(header, cfg) -> dict:
                 if cur_len > best_len:
                     best_len = cur_len
                     best_profile = profile
+    result: dict | None = None
     if best_profile is not None:
-        return {
+        result = {
             "preferred_registration": getattr(best_profile, "preferred_registration", "fft"),
             "max_rotation_deg": getattr(best_profile, "max_rotation_deg", 2.0),
             "max_exptime_fft_warn": getattr(best_profile, "max_exptime_fft_warn", 45),
@@ -1192,27 +1216,36 @@ def _detect_equipment_from_header(header, cfg) -> dict:
             "name": getattr(best_profile, "name", None),
         }
     # Hardcoded fallback for DWARF MINI without explicit profile (AZ 15 deg)
-    if "DWARF" in telescop and "MINI" in telescop:
+    elif "DWARF" in telescop and "MINI" in telescop:
         # Try to find dwarf_mini profile for values
         for profile in profiles:
             if str(getattr(profile, "name", "")).lower() == "dwarf_mini":
-                return {
+                result = {
                     "preferred_registration": getattr(profile, "preferred_registration", "astroalign"),
                     "max_rotation_deg": getattr(profile, "max_rotation_deg", 15),
                     "max_exptime_fft_warn": getattr(profile, "max_exptime_fft_warn", 45),
                     "mount_type": getattr(profile, "mount_type", "az"),
                     "name": getattr(profile, "name", "dwarf_mini"),
                 }
-        return {
-            "preferred_registration": "astroalign",
-            "max_rotation_deg": 15.0,
-            "max_exptime_fft_warn": 45.0,
-            "mount_type": "az",
-            "name": "dwarf_mini",
-        }
+                break
+        if result is None:
+            result = {
+                "preferred_registration": "astroalign",
+                "max_rotation_deg": 15.0,
+                "max_exptime_fft_warn": 45.0,
+                "mount_type": "az",
+                "name": "dwarf_mini",
+            }
     # SEESTAR etc. -> generic AZ if profile missing but header indicates AZ device
-    # Fallback: none
-    return {}
+    if result is None:
+        return {}
+
+    # DEF-009: EQMODE ueberschreibt Profil-mount_type, damit Header-Wissen
+    # gewinnt und logging/run-info konsistent bleiben.
+    mt_from_eqmode = _mount_type_from_eqmode(header)
+    if mt_from_eqmode is not None:
+        result["mount_type"] = mt_from_eqmode
+    return result
 
 
 def resolve_registration_config(
@@ -1221,6 +1254,7 @@ def resolve_registration_config(
     header=None,
     exptimes: list[float] | None = None,
     cli_method: str | None = None,
+    mount_type: str | None = None,
 ) -> dict:
     """V19-REG-SMART R3: Priority Chain CLI > Equipment-Profil > Auto-Detect > Config Default > hardcoded fft.
 
@@ -1228,6 +1262,9 @@ def resolve_registration_config(
     Integrationspunkt cli.py:531 (inject mount_type via detect_mount_type).
     Spec R3 result dict mit method, max_control_points, max_rotation_deg, max_scale_dev,
     zero_shift_threshold, zero_shift_fallback, max_exptime_fft_warn.
+
+    DEF-009: Optionaler mount_type-Override wird an detect_preferred_registration
+    durchgereicht, wenn Auto-Detect greift (vermeidet doppelte Header-Analyse).
     """
     # Lazy import to avoid circular
     try:
@@ -1290,7 +1327,9 @@ def resolve_registration_config(
     # 3. Auto-Detect (falls kein Equipment-Profil matched)
     if not equip_dict and header is not None and detect_preferred_registration is not None:
         try:
-            auto_method = detect_preferred_registration(header, exptimes or [])
+            auto_method = detect_preferred_registration(
+                header, exptimes or [], mount_type=mount_type
+            )
             result["method"] = auto_method
             if auto_method in ("astroalign", "rotation_fft"):
                 result["max_rotation_deg"] = 15.0
@@ -1319,6 +1358,7 @@ def resolve_group_registration_configs(
     groups: dict[str, list[Path]],
     cli_override: str | None = None,
     global_equipment: dict | None = None,
+    eqmode_by_group: dict[str, dict] | None = None,
 ) -> dict[str, dict]:
     """V19-REG-SMART R5: Registration-Config fuer jede Gruppe einzeln aufloesen.
 
@@ -1327,6 +1367,11 @@ def resolve_group_registration_configs(
     global_equipment mergen, dann resolve_registration_config aufrufen.
     Logger.info multi_group.group_registration_config je Gruppe.
     Cross-Group Config ist fest astroalign 20 deg (separater Helper).
+
+    DEF-009: eqmode_by_group kann die aus den Original-Light-Headers bekannte
+    EQMODE-Mehrheit pro Gruppe enthalten. Sie hat Vorrang vor dem erneuten
+    Header-Lesen aus den Zwischen-Dateien (die EQMODE u.U. nicht bewahrt haben)
+    und verhindert irrefuehrende discovery.mount_unknown-Warnungen.
     """
     from astropy.io import fits as _fits  # lazy
 
@@ -1366,14 +1411,30 @@ def resolve_group_registration_configs(
             effective = dict(group_equipment)
         else:
             effective = {}
+        # DEF-009: Bekannte EQMODE-Mehrheit aus Original-Light-Headers hat
+        # Vorrang (Zwischen-Dateien haben EQMODE u.U. nicht bewahrt).
+        eqmode_majority = None
+        eqmode_info = (eqmode_by_group or {}).get(group_name)
+        if eqmode_info is not None:
+            eqmode_majority = eqmode_info.get("majority")
+        mt_from_eqmode = None
+        if eqmode_majority == 0:
+            mt_from_eqmode = "az"
+        elif eqmode_majority == 1:
+            mt_from_eqmode = "eq"
+
         effective_param = effective if effective else None
         cfg_result = resolve_registration_config(
-            cfg=cfg, equipment=effective_param, header=header, exptimes=exptimes, cli_method=cli_override,
+            cfg=cfg, equipment=effective_param, header=header, exptimes=exptimes,
+            cli_method=cli_override, mount_type=mt_from_eqmode,
         )
         group_configs[group_name] = cfg_result
         # Logging
         try:
             mount_type = effective.get("mount_type", "unknown") if effective else "unknown"
+            if mount_type == "unknown" and mt_from_eqmode is not None:
+                mount_type = mt_from_eqmode
+            # Nur wenn weder Equipment noch EQMODE-Info vorliegt: Header-Heuristik.
             if mount_type == "unknown" and header is not None:
                 try:
                     from ..core.equipment import detect_mount_type  # type: ignore
@@ -1400,8 +1461,8 @@ def get_cross_group_registration_config() -> dict:
 
 def resolve_merge_filters(
     cfg: AppConfig,
-    cli_filters: Optional[tuple[str, ...] | list[str]] = None,
-) -> Optional[list[str]]:
+    cli_filters: tuple[str, ...] | list[str] | None = None,
+) -> list[str] | None:
     """V1.7-1 FSM-A (AC-FSM-A3): Effektive Merge-Filter-Liste aufloesen.
 
     Precedence: CLI > Config (AppConfig.multi_group.merge.filters) > Default
@@ -1422,7 +1483,7 @@ def resolve_merge_filters(
         (Default, AC-FSM-A1).
     """
     # Config-Wert (None = nicht gesetzt, [] = explizit leer)
-    config_filters: Optional[list[str]] = None
+    config_filters: list[str] | None = None
     if cfg.multi_group is not None and cfg.multi_group.merge is not None:
         config_filters = cfg.multi_group.merge.filters
 

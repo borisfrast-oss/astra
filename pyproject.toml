@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "astra-pipeline"
-version = "1.9.0rc1"
+version = "1.9.0"
 description = "Agentic Astrophotography Processing Pipeline"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -39,6 +39,9 @@ dependencies = [
     "rich>=13.0",
     "prompt-toolkit>=3.0",
     "python-dotenv>=1.0",
+    # DEF-008 (Boris-Entscheid 2026-09-02): astroquery ist Base-Dependency,
+    # damit PCC (GAIA/VizieR/APASS) out-of-the-box verfuegbar ist.
+    "astroquery>=0.4",
 ]
 
 [project.optional-dependencies]
@@ -50,19 +53,22 @@ dev = [
     "mypy>=1.10",
     "yamllint>=1.35",
     # Full test-suite environment (CI-equivalent). Mirrors the astroalign extra
-    # plus astroquery so that `pip install -e .[dev]` runs every test without
-    # optional-dependency skips.
+    # so that `pip install -e .[dev]` runs every test without optional-dependency
+    # skips. astroquery ist seit DEF-008 Base-Dependency und muss hier nicht
+    # mehr wiederholt werden.
     "astroalign>=2.6,<3",
     "scikit-image>=0.24",
+    "scikit-learn>=1.1",
     "sep>=1.4",
-    "astroquery>=0.4",
 ]
 graxpert = ["graxpert>=3.2"]
 astro = ["astrometry-net>=0.97"]
 # W9-A (AC-W9-A1, ADR-021): optional astroalign extra.
 # sep is a hard runtime dependency (unconditional `import sep` in _find_sources).
 # scikit-image is a lazy/optional dependency loaded by astroalign when used.
-astroalign = ["astroalign>=2.6,<3", "scikit-image>=0.24", "sep>=1.4"]
+# scikit-learn ist ebenfalls lazy: wird von scikit-image bei astroalign-Nutzung
+# benoetigt, aber nicht beim reinen `import astroalign` (DEF-007).
+astroalign = ["astroalign>=2.6,<3", "scikit-image>=0.24", "scikit-learn>=1.1", "sep>=1.4"]
 
 [project.scripts]
 astra = "astro_process.cli:cli"
