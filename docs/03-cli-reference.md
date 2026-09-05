@@ -32,6 +32,7 @@
 | `plugin list` | List registered pipeline-step plugins (PL-C). Exit codes: 0 = OK (even with no | - |
 | `process` | Process a single target directory. The global --config/-c option must be placed before the | target_path, --preset, --output, --dry-run |
 | `status` | Show system status (disk space, recent runs, darks library, config health, queue). | --json |
+| `suggest` | Suggest a preset, registration method, debayer method, and PCC settings for a target. Offline-first | target, --header, --coords, --output |
 | `target` | Target management (list/add/show/update/remove). | - |
 | `target list` | List all targets and their progress. | - |
 | `target add` | Create a new target and generate an AUFNAHMELISTE_{Target}.md template. | - |
@@ -248,6 +249,7 @@ Process a single target directory. The global --config/-c option must be placed 
 | `--preflight` | boolean | False | Run pre-flight checks only (hot-pixel scan, dark matching, cosmetic |
 | `--yes` | boolean | False | With --preflight: start the pipeline immediately if checks pass |
 | `--no-calib` | boolean |  | Skip calibration phase (pre-calibrated lights). Note: lights must be CFA/2D |
+| `--from-suggested` | file |  | Load preset, registration method, debayer method, and PCC settings from a |
 
 ## `status`
 
@@ -256,6 +258,18 @@ Show system status (disk space, recent runs, darks library, config health, queue
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--json` | boolean | False | Machine-readable output (JSON) |
+
+## `suggest`
+
+Suggest a preset, registration method, debayer method, and PCC settings for a target. Offline-first advisor (Header > target-cache > SIMBAD > Handbook): HEADER wins over TARGET; target-cache (stella-maintained) always wins over SIMBAD; SIMBAD only queried on cache miss if network available (5s timeout). On failure: generic fallback + warning, never crash, always Exit 0. Output writes to stdout (human-readable) or --json (machine-readable). Optional --output writes suggested_parameters to YAML/JSON file (default: C:/Astra/<Target>/suggested.yaml). This command is an ADVISOR (never runs process); process reads file only via explicit --from-suggested flag. Examples: astra suggest M31; astra suggest M27 --header C:/Astra/M27/light_0001.fits; astra suggest C19 --json --output
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `target` | text | Sentinel.UNSET |  |
+| `--header` | file |  | Read OBJECT, FILTER, EXPTIME, TELESCOP, DET-TEMP from a local FITS file header |
+| `--coords` | text |  | Fallback right ascension and declination (RA DEC in decimal degrees) when |
+| `--output` | path |  | Write suggested_parameters to a file as YAML (default format) or JSON (if path |
+| `--json` | boolean | False | Print the machine-readable JSON suggestion to stdout (in addition to or instead |
 
 ## `target`
 

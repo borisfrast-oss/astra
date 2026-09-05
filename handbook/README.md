@@ -1,92 +1,95 @@
-# Dwarf 3 + Siril 1.4.4
-# Best Practices Handbuch für Astrofotografie
+# Dwarf mini + Siril 1.4.4
+# Best Practices Handbook for Astrophotography
 
-**Version:** 1.0  
-**Stand:** 2026  
+**Version:** 1.1  
+**Date:** 2026-09  
+**Profile:** `dwarf_mini` (alias `dwarf3` deprecated since V19 — hardware identical, 2.9 µm pixel, 150 mm focal length)
 
 **Workflow:**
 
-- DwarfLab Dwarf 3 mini
+- DwarfLab Dwarf mini (formerly `dwarf3`)
 - Siril 1.4.4
 - GraXpert
 - GIMP 3.x
 
+> **Note (V19):** Since V19 the profile is named `dwarf_mini`; `dwarf3` remains as a deprecated alias for compatibility.
+
 ---
 
-# Zweck dieses Handbuchs
+# Purpose of this Handbook
 
-Dieses Handbuch beschreibt einen praxisorientierten Workflow zur Verarbeitung von Astrofotografie-Aufnahmen mit dem Dwarf 3 mini Smart Telescope.
+This handbook describes a practical workflow for processing astrophotography captures with the Dwarf mini smart telescope.
 
-Der Schwerpunkt liegt auf:
+Focus:
 
-- Deep-Sky-Astrofotografie
-- FITS-Verarbeitung
+- Deep-sky astrophotography
+- FITS processing
 - Siril 1.4.4
-- reproduzierbaren Workflows
-- objektabhängiger Bildbearbeitung
-- sinnvollen Standardparametern
+- Reproducible workflows
+- Target-dependent processing
+- Sensible default parameters
 
-Das Ziel ist nicht nur:
+The goal is not:
 
-> "Klicke hier und dort"
+> "Click here and there"
 
-sondern:
+but:
 
-> Verstehen, warum ein Verarbeitungsschritt gemacht wird und wann er sinnvoll ist.
-
----
-
-# Grundprinzip der Astrofotografie
-
-Astrofotografie unterscheidet sich grundlegend von normaler Fotografie.
-
-Ein Rohbild enthält:
-
-- Nutzsignal des Himmelsobjekts
-- Hintergrundlicht
-- Sensorausleserauschen
-- Dunkelstrom
-- Hotpixel
-- zufällige Störungen
-
-Die Bildverarbeitung verfolgt vier Hauptziele:
-
-1. Fehler entfernen
-2. Signal erhalten
-3. Rauschen reduzieren
-4. Farben korrekt darstellen
+> Understand why a processing step is performed and when it is useful.
 
 ---
 
-# Standardworkflow
+# Fundamentals of Astrophotography
+
+Astrophotography differs fundamentally from normal photography.
+
+A raw frame contains:
+
+- Useful signal of the celestial object
+- Sky background
+- Read noise
+- Dark current
+- Hot pixels
+- Random disturbances
+
+Image processing pursues four main goals:
+
+1. Remove errors
+2. Preserve signal
+3. Reduce noise
+4. Render colors correctly
+
+---
+
+# Standard Workflow
 
 ```text
-Dwarf 3 Aufnahme
+Dwarf mini acquisition
 
         ↓
 
-FITS Lights
+FITS lights
 
         ↓
 
-Darks aufnehmen
+Acquire darks
 
         ↓
 
 Siril:
-Sequenzen erstellen
+Create sequences
 
         ↓
 
-Master Dark erstellen
+Create master dark
 
         ↓
 
-Lights kalibrieren
+Calibrate lights
 
         ↓
 
-Registrierung
+Registration
 
         ↓
 
@@ -94,7 +97,7 @@ Stacking
 
         ↓
 
-Lineares Masterbild
+Linear master
 
         ↓
 
@@ -102,7 +105,7 @@ Background Extraction
 
         ↓
 
-Photometrische Farbkalibrierung
+Photometric Color Calibration
 
         ↓
 
@@ -115,144 +118,144 @@ GraXpert (optional)
         ↓
 
 GIMP:
-Finalisierung
+Finalization
 ````
 
 ---
 
-# Grundregel
+# Ground Rule
 
-## Mehr Signal ist wichtiger als mehr Bearbeitung
+## More signal matters more than more processing
 
-Die wichtigste Verbesserung eines Astrobildes entsteht meistens durch:
+The biggest improvement to an astro image usually comes from:
 
-* längere Gesamtbelichtungszeit
-* mehr Einzelbilder
-* bessere Aufnahmebedingungen
+* longer total exposure time
+* more sub-frames
+* better acquisition conditions
 
-Beispiel:
-
-```text
-16 × 180 Sekunden
-
-= 48 Minuten Integrationszeit
-```
-
-ist ein brauchbarer Anfang.
-
-Mehr Daten:
+Example:
 
 ```text
-60 × 180 Sekunden
+16 × 180 seconds
 
-= 3 Stunden Integrationszeit
+= 48 minutes integration time
 ```
 
-führen normalerweise zu:
+is a workable start.
 
-* weniger Rauschen
-* schwächeren sichtbaren Details
-* besserem Hintergrund
-* höherer Farbstabilität
+More data:
+
+```text
+60 × 180 seconds
+
+= 3 hours integration time
+```
+
+typically leads to:
+
+* less noise
+* fainter detail becoming visible
+* cleaner background
+* more stable colors
 
 ---
 
-# Dwarf 3 Standardempfehlungen
+# Dwarf mini Standard Recommendations
 
 ## Deep Sky
 
-| Parameter       | Empfehlung                                  |
-| --------------- | ------------------------------------------- |
-| Belichtungszeit | abhängig vom Objekt, häufig 60–180 Sekunden |
-| Gain            | abhängig vom Objekt und Aufnahmeziel        |
-| Lights          | möglichst viele Einzelbilder                |
-| Darks           | 10–20 oder mehr                             |
-| Flats           | optional bei Bedarf                         |
-| Bias            | meistens nicht erforderlich                 |
+| Parameter       | Recommendation                               |
+| --------------- | -------------------------------------------- |
+| Exposure time   | depends on target, often 60–180 seconds      |
+| Gain            | depends on target and goal                   |
+| Lights          | as many sub-frames as possible               |
+| Darks           | 10–20 or more                                |
+| Flats           | optional as needed                           |
+| Bias            | usually not required                         |
 
-Die optimalen Werte hängen ab von:
+Optimal values depend on:
 
-* Objekt
-* Himmelshintergrund
-* Mondphase
-* Filter
-* gewünschtem Ergebnis
-
----
-
-# Objektklassen
-
-Nicht jedes Objekt wird gleich verarbeitet.
-
-| Objekt              | Beispiele       | Besonderheit            |
-| ------------------- | --------------- | ----------------------- |
-| Galaxien            | M31, M33, M51   | schwaches Signal        |
-| Emissionsnebel      | M42, NGC7000    | Gasstrukturen           |
-| Reflexionsnebel     | M78             | feine Kontraste         |
-| Planetarische Nebel | M57             | kleine helle Objekte    |
-| Kugelsternhaufen    | M13             | viele Sterne            |
-| Offene Sternhaufen  | M45             | Sternfarben             |
-| Sternfelder         | Milchstraße     | natürliche Sternwirkung |
-| Einzelsterne        | helle Sterne    | Farbtreue               |
-| Mond                | Oberfläche      | kurze Belichtung        |
-| Sonne               | Oberfläche      | Spezialfilter notwendig |
-| Planeten            | Jupiter, Saturn | kurze Einzelbilder      |
-| Kometen             | bewegte Objekte | spezielle Verarbeitung  |
+* target
+* sky background
+* moon phase
+* filter
+* desired result
 
 ---
 
-# Kalibrierframes
+# Target Classes
+
+Not every object is processed the same.
+
+| Object              | Examples        | Characteristic            |
+| ------------------- | --------------- | ------------------------- |
+| Galaxies            | M31, M33, M51   | faint signal              |
+| Emission nebulae    | M42, NGC7000    | gas structures            |
+| Reflection nebulae  | M78             | subtle contrast           |
+| Planetary nebulae   | M57             | small bright objects      |
+| Globular clusters   | M13             | many stars                |
+| Open clusters       | M45             | star colors               |
+| Star fields         | Milky Way       | natural star rendering    |
+| Single stars        | bright stars    | color fidelity            |
+| Moon                | surface         | short exposure            |
+| Sun                 | surface         | special filter required   |
+| Planets             | Jupiter, Saturn | short single frames       |
+| Comets              | moving objects  | special processing        |
+
+---
+
+# Calibration Frames
 
 ## Darks
 
-Darks enthalten keine Lichtinformation.
+Darks contain no light information.
 
-Sie messen:
+They measure:
 
-* Hotpixel
-* Dunkelstrom
-* Sensormuster
+* hot pixels
+* dark current
+* sensor pattern
 
-Lights und Darks sollten möglichst identisch aufgenommen werden.
+Lights and darks should be acquired as identically as possible.
 
-| Parameter       | möglichst gleich  |
+| Parameter       | ideally identical |
 | --------------- | ----------------- |
-| Kamera          | ja                |
-| Belichtungszeit | ja                |
-| Gain            | ja                |
-| Temperatur      | möglichst ähnlich |
+| Camera          | yes               |
+| Exposure time   | yes               |
+| Gain            | yes               |
+| Temperature     | as close as possible |
 
 ---
 
 ## Flats
 
-Flats korrigieren:
+Flats correct:
 
-* Vignettierung
-* Staubflecken
-* ungleichmäßige Ausleuchtung
+* vignetting
+* dust spots
+* uneven illumination
 
-Flats müssen zum verwendeten Setup passen.
+Flats must match the optical setup used.
 
 ---
 
 ## Bias
 
-Bias beschreibt das elektronische Grundsignal des Sensors.
+Bias describes the electronic offset of the sensor.
 
-Beim Dwarf-3-Workflow ist die Verwendung häufig nicht notwendig, da Darks bereits einen großen Teil der Korrektur übernehmen.
+In the Dwarf mini workflow bias is often unnecessary because darks already handle most of the correction.
 
 ---
 
-# Farbworkflow
+# Color Workflow
 
-Der Dwarf 3 besitzt einen Farbsensor mit Bayer-Matrix.
+The Dwarf mini has a color sensor with Bayer matrix.
 
-Nach dem Stack kann ein Bild grün erscheinen.
+After stacking the image may appear green.
 
-Das ist normal.
+This is normal.
 
-Empfohlene Reihenfolge:
+Recommended order:
 
 ```text
 Stack
@@ -274,7 +277,7 @@ Green Noise Reduction (optional)
 Stretch
 ```
 
-Nicht:
+Not:
 
 ```text
 Green Noise Reduction
@@ -284,206 +287,215 @@ Green Noise Reduction
 Color Calibration
 ```
 
-Grund:
+Reason:
 
-Die Farbkalibrierung sollte auf der ursprünglichen Farbverteilung basieren.
+Color calibration should be based on the original color distribution.
+
+> **V19-FIX-13 Duo-Band note:** For Duo-Band targets use `nebula_standard` (PCC off, SCNR on). `star_standard` + Duo-Band + PCC pushes red (C19 R/G 1.608 vs 1.006 with nebula_standard) — see Chapters 06/08/15.
 
 ---
 
 # Stacking
 
-## Durchschnitt
+## Average
 
-Vorteile:
+Advantages:
 
-* maximale Signalnutzung
+* maximum signal usage
 
-Nachteile:
+Disadvantages:
 
-* Ausreißer bleiben erhalten
+* outliers remain
 
 ---
 
 ## Median
 
-Vorteile:
+Advantages:
 
-* entfernt Ausreißer
+* removes outliers
 
-Nachteile:
+Disadvantages:
 
-* etwas weniger Signal
-
----
-
-## Winsor Sigma Clipping
-
-Empfohlen für viele Deep-Sky-Aufnahmen.
-
-Entfernt:
-
-* Satellitenspuren
-* Flugzeuge
-* einzelne Ausreißer
+* slightly less signal
 
 ---
 
-# Softwareaufteilung
+## Winsorized Sigma Clipping
+
+Recommended for many deep-sky images.
+
+Removes:
+
+* satellite trails
+* airplanes
+* single outliers
+
+---
+
+# Software Responsibilities
 
 ## Siril
 
-Verantwortlich für:
+Responsible for:
 
-* FITS-Verarbeitung
-* Sequenzen
-* Kalibrierung
-* Registrierung
-* Stack
-* Farbkalibrierung
-* lineares Processing
-* Stretching
+* FITS processing
+* sequences
+* calibration
+* registration
+* stacking
+* color calibration
+* linear processing
+* stretching
 
 ---
 
 ## GraXpert
 
-Verantwortlich für:
+Responsible for:
 
-* Hintergrundgradienten
-* Lichtverschmutzungskorrektur
-* optionales Entrauschen
+* background gradients
+* light-pollution correction
+* optional denoising
 
 ---
 
 ## GIMP
 
-Verantwortlich für:
+Responsible for:
 
-* finale Bildbearbeitung
-* Kontrast
-* lokale Anpassungen
-* Präsentation
-* Export
-
----
-
-# Handbuchstruktur
-
-Die Kapitel sind in fünf Bereiche gegliedert.
+* final image editing
+* contrast
+* local adjustments
+* presentation
+* export
 
 ---
 
-## 1. Grundlagen
+# Handbook Structure
+
+Chapters are organized in five sections.
+
+---
+
+## 1. Fundamentals
 
 ```text
 README.md
 
-01-Einleitung.md
-02-Grundlagen.md
-03-Dwarf3-Best-Practices.md
-04-Siril-Referenz.md
+01-Introduction.md
+02-Fundamentals.md
+03-Dwarf-mini-Best-Practices.md
+04-Siril-Reference.md
 ```
 
 ---
 
-## 2. Objektbezogene Verarbeitung
+## 2. Target-Specific Processing
 
 ```text
-05-Galaxien.md
-06-Emissionsnebel.md
-07-Reflexionsnebel.md
-08-Planetarische-Nebel.md
-09-Kugelsternhaufen.md
-10-Offene-Sternhaufen.md
-11-Sterne-und-Sternfelder.md
-12-Mond-und-Planeten.md
-13-Milchstrasse-und-Weitfeld.md
-14-Kometen.md
-15-Sternentstehungsgebiete-und-Komplexe-Nebel.md
-16-Dunkelnebel.md
+05-Galaxies.md
+06-Emission-Nebulae.md
+07-Reflection-Nebulae.md
+08-Planetary-Nebulae.md
+09-Globular-Clusters.md
+10-Open-Clusters.md
+11-Stars-and-Star-Fields.md
+12-Moon-and-Planets.md
+13-Milky-Way-and-Wide-Field.md
+14-Comets.md
+15-Star-Forming-Regions-and-Complex-Nebulae.md
+16-Dark-Nebulae.md
 ```
 
 ---
 
-## 3. Bildverarbeitung
+## 3. Image Processing
 
 ```text
-17-Mehrfachbelichtungen-und-HDR.md
-18-Mosaike-und-Panoramen.md
-19-Farbkalibrierung-und-Endbearbeitung.md
+17-Multiple-Exposures-and-HDR.md
+18-Mosaics-and-Panoramas.md
+19-Color-Calibration-and-Final-Processing.md
 ```
 
 ---
 
-## 4. Praxis und Werkzeuge
+## 4. Practice and Tools
 
 ```text
-20-Dwarf3-Aufnahmeempfehlungen.md
-21-Siril-1.4.4-Parameterreferenz.md
-22-Siril-Workflow-Entscheidungsbaum.md
-23-Siril-Fehlerbehebung.md
-24-Dwarf3-Master-Rezepte.md
-25-GIMP-Astrofotografie-Workflow.md
+20-Dwarf-mini-Imaging-Recommendations.md
+21-Siril-1.4.4-Parameter-Reference.md
+22-Siril-Workflow-Decision-Tree.md
+23-Siril-Troubleshooting.md
+24-Dwarf-mini-Master-Recipes.md
+25-GIMP-Astrophotography-Workflow.md
 26-GraXpert-Workflow.md
-27-Astrofotografie-Datenmanagement.md
-28-Fortgeschrittene-Techniken.md
+27-Astrophotography-Data-Management.md
+28-Advanced-Techniques.md
 ```
 
 ---
 
-## 5. Referenz und Nachschlagewerk
+## 5. Reference
 
 ```text
-29-Siril-Schnellcheckliste.md
-30-Dwarf3-Aufnahmeliste-vor-der-Nacht.md
-31-Objekt-Auswahl-nach-Jahreszeit.md
-32-Astrofotografie-Glossar.md
-33-Finale-Dwarf3-Siril-Referenzparameter.md
-34-Siril-1.4.4-Menue-Navigation.md
-35-Fehlerdiagnose-Astrofotografie.md
-36-Dwarf3-End-to-End-Workflow.md
+29-Siril-Quick-Checklist.md
+30-Dwarf-mini-Pre-Night-Imaging-Checklist.md
+31-Target-Selection-by-Season.md
+32-Astrophotography-Glossary.md
+33-Final-Dwarf-mini-Siril-Reference-Parameters.md
+34-Siril-1.4.4-Menu-Navigation.md
+35-Troubleshooting-Astrophotography.md
+36-Dwarf-mini-End-to-End-Workflow.md
 37-Siril-Command-Quick-Reference.md
 ```
 
 ---
 
-# Versionshistorie
+# Version History
+
+## Version 1.1 (2026-09)
+
+- English translation of all 36 chapters (§17)
+- `dwarf3` → `dwarf_mini` rename (profile `dwarf_mini`, alias `dwarf3` deprecated since V19, hardware identical)
+- V19 addendum integrated: REG-SMART, CFA-GATE, PCC-FLAG, ghosting guard and Duo-Band Rosa fix (Ch. 06/07/08/15/22/23)
+- Chapter file names DE → EN (git mv, 36 files)
 
 ## Version 1.0
 
-Erste strukturierte Version.
+Initial structured version.
 
 Basis:
 
-* Dwarf 3 mini
+* Dwarf mini (formerly `dwarf3`)
 * Siril 1.4.4
 * GraXpert
 * GIMP
 
 ---
 
-# Ziel des Handbuchs
+# Goal of the Handbook
 
-Ein reproduzierbarer Workflow:
+A reproducible workflow:
 
 ```text
-Aufnehmen
+Acquire
 
 ↓
 
-Verstehen
+Understand
 
 ↓
 
-Verarbeiten
+Process
 
 ↓
 
-Verbessern
+Improve
 
 ↓
 
-Archivieren
+Archive
 ```
 
-Astrofotografie wird dadurch nicht nur ein Trial-and-Error-Prozess, sondern ein nachvollziehbarer Arbeitsablauf.
+Astrophotography thus becomes a traceable workflow rather than trial and error.

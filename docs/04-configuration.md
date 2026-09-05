@@ -36,13 +36,14 @@
 | `rejection_enabled` | typing.Optional[bool] |  | - |
 | `rejection_thresholds` | typing.Optional[dict[str, tuple[typing.O |  | - |
 | `rejection_elongation` | typing.Optional[bool] |  | - |
-| `rejection_min_corr_hp` | typing.Optional[float] |  | - |
+| `rejection_min_corr_hp` | typing.Optional[float] | 0.05 | - |
 | `frame_selection` | typing.Optional[astro_process.config.mod |  | - |
 | `cosmetic_correction` | typing.Optional[astro_process.config.mod |  | - |
 | `gaia_timeout` | <class 'float'> | 30.0 | Timeout in seconds for GAIA catalog queries. |
 | `vizier_apass_timeout` | <class 'float'> | 30.0 | Timeout in seconds for APASS catalog queries. |
 | `vizier_refcat2_timeout` | <class 'float'> | 30.0 | Timeout in seconds for REFCAT2 catalog queries. |
 | `pcc` | <class 'astro_process.config.models.PCCC | PydanticUndefined | - |
+| `suggest` | typing.Optional[astro_process.config.mod |  | - |
 | `filename_patterns` | typing.Optional[astro_process.config.mod |  | - |
 | `cfa_drizzle` | typing.Optional[astro_process.config.mod |  | - |
 | `debayer_method` | typing.Optional[typing.Literal['superpix |  | Default debayer algorithm: superpixel, bilinear, or malvar. |
@@ -116,7 +117,7 @@
 | `max_rotation_deg` | <class 'float'> | 2.0 | Sanity-guard maximum rotation in degrees. |
 | `max_scale_dev` | <class 'float'> | 0.02 | Maximum allowed scale deviation for registration. |
 | `stack_scale_factor` | <class 'float'> | 2.0 | Sub-pixel upsampling factor for shift measurement. |
-| `zero_shift_threshold` | <class 'float'> | 0.0 | High-pass correlation threshold for zero-shift fallback. |
+| `zero_shift_threshold` | <class 'float'> | 0.05 | High-pass correlation threshold for zero-shift fallback. |
 | `zero_shift_fallback` | <class 'bool'> | True | Fall back to zero shift when correlation is below threshold. |
 | `max_exptime_fft_warn` | <class 'float'> | 45.0 | Threshold in seconds above which a warning is emitted for fft registration on AZ |
 
@@ -175,18 +176,29 @@ gpu_acceleration: true
 keep_working: false
 quality_accept_threshold: 80
 quality_review_threshold: 60
-gaia_timeout: 60.0
-vizier_apass_timeout: 30.0
-vizier_refcat2_timeout: 30.0
-pcc:
-  quality_gate:
-    enabled: true
-    min_factor: 0.5
-    max_factor: 2.0
 plate_solve_enabled: false
 use_flats: false
 use_bias: false
-darks_repository: C:/Astra/_darks
+no_calib: false
+dark_scale_mismatch_abs: 5.0
+dark_scale_mismatch_frac: 0.04
+dark_scale_mismatch_low_frac: 0.5
+registration:
+  method: fft
+  max_control_points: null
+  max_rotation_deg: 2.0
+  max_scale_dev: 0.02
+  stack_scale_factor: 2.0
+  zero_shift_threshold: 0.05
+  zero_shift_fallback: true
+gradient_removal:
+  enabled: false
+  degree: 2
+  grid:
+  - 16
+  - 16
+  sigma_clip: 3.0
+  min_samples: null
 cosmetic_correction:
   enabled: false
   n_frames: 3
@@ -199,6 +211,7 @@ cfa_drizzle:
   pixfrac: 0.5
   kernel: lanczos3
   quality_gate:
+    mode: auto
     rejection_enabled: true
     thresholds:
       fwhm:
@@ -217,7 +230,12 @@ cfa_drizzle:
     min_stars_cfa: 3
   min_frames: 5
   fallback: malvar
-rejection_min_corr_hp: 0.05
+pcc:
+  enabled: null
+  quality_gate:
+    enabled: true
+    min_factor: 0.5
+    max_factor: 2.0
 multi_group:
   reference_group: quality
   pcc_fallback: auto
@@ -261,7 +279,7 @@ equipment_profiles:
 
 ```
 
-Presets defined: 4
+Presets defined: 6
 
 ## Precedence & ENV
 

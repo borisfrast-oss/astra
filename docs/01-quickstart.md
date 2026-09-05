@@ -25,6 +25,7 @@ astra --help
 | `plugin` | Plugin management (v1.2, PL-C): pipeline-step plugins in the |
 | `process` | Process a single target directory. The global --config/-c option must |
 | `status` | Show system status (disk space, recent runs, darks library, config |
+| `suggest` | Suggest a preset, registration method, debayer method, and PCC |
 | `target` | Target management (list/add/show/update/remove). |
 
 ## First run

@@ -1,9 +1,6 @@
 # Contributing to Astra
 
-Thank you for your interest in contributing to **Astra**, the agentic
-astrophotography processing pipeline. Astra is a free, open-source, community
-release. All contributions — code, docs, bug reports, feature ideas — are
-welcome.
+Thank you for your interest in **Astra**. Astra is a free, open-source release maintained by **Boris Frast** (solo maintainer). Contributions via **issues and discussions** are always welcome; **code pull requests are welcome for small fixes/docs** and **by invitation/discussion for larger features**.
 
 Please read this guide before opening an issue or pull request.
 
@@ -21,6 +18,12 @@ Found a security vulnerability? Do **not** open a public issue. Please follow
 the disclosure process described in our [Security Policy](SECURITY.md) —
 report privately via GitHub Security Advisories or
 [borisfrast@gmail.com](mailto:borisfrast@gmail.com).
+
+---
+
+## Project model
+
+Astra is **solo-maintained** — roadmap and architecture decisions are made by the maintainer. External pull requests for bug fixes and documentation are welcome. Larger features or refactors should start as a **proposal/discussion** (issue with `proposal` label, handbook reference) so scope and quality can be aligned before code. This keeps review load manageable and ensures result quality (see recent v1.9.0 → v1.9.1 hotfix need for real-data validation before publish — no publish before quality gate).
 
 ---
 
@@ -49,6 +52,8 @@ report privately via GitHub Security Advisories or
    Python 3.11**. Resolve any failures before requesting review.
 7. **Review** — a maintainer will review your PR. Address feedback and keep the
    conversation focused. Once approved, it will be merged.
+
+> **Note for larger features:** Please open a discussion/proposal first (see `handbook/22-Siril-Workflow-Decision-Tree.md`, future `astra suggest` flow) — don't start coding without maintainer alignment.
 
 ---
 

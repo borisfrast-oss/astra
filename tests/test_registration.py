@@ -664,7 +664,7 @@ def test_agent_zero_shift_guard_rejects_astroalign_winner(
         _write_2d_frame(tmp_path / "f1.fits", img),
     ]
     agent = _make_agent(tmp_path / "out")
-    # explizit hohe Schwelle (Default seit V1.3-1: 0.0)
+    # explizit hohe Schwelle (Default seit V19-FIX-12: 0.05)
     params = {"registration": {"method": "astroalign",
                                "max_control_points": None,
                                "zero_shift_threshold": 0.3}}
@@ -697,7 +697,7 @@ def test_agent_zero_shift_fft_branch_unchanged(
         _write_2d_frame(tmp_path / "f1.fits", img),
     ]
     agent = _make_agent(tmp_path / "out")
-    # explizit hohe Schwelle (Default seit V1.3-1: 0.0)
+    # explizit hohe Schwelle (Default seit V19-FIX-12: 0.05)
     params = {"registration": {"method": "fft", "max_control_points": None,
                                "zero_shift_threshold": 0.3}}
     registered = _register_frames(agent, frames, params, is_3d=False)
@@ -952,8 +952,9 @@ def test_agent_az_field_rotation_reject_at_0_5_threshold(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
     """AC-RE-F1 Real (nur mit Extra): AZ-Feldrotations-Analog (UGC-10822,
-    Duo-Band, Rotation 1.9 Grad, Subpixel-Shifts) — bei Default-Schwelle 0.0
-    gewinnt astroalign die Arbitration normal (corr_hp_aa ~0.43-0.48);
+    Duo-Band, Rotation 1.9 Grad, Subpixel-Shifts) — bei Default-Schwelle 0.05
+    (V19-FIX-12) gewinnt astroalign die Arbitration normal (corr_hp_aa
+    ~0.43-0.48, weiterhin > 0.05);
     bei `zero_shift_threshold=0.5` liegt corr_hp unter der Schwelle und JEDER
     Nicht-Referenz-Frame wird verworfen (`registration.frame_rejected`,
     len(registered) == 1 = nur Referenz). Das belegt den RE-F-Beleg:
@@ -1101,7 +1102,7 @@ def test_register_frames_counts_rejected_frames(
         _write_2d_frame(tmp_path / "f2.fits", img),
     ]
     agent = _make_agent(tmp_path / "out")
-    # explizit hohe Schwelle (Default seit V1.3-1: 0.0)
+    # explizit hohe Schwelle (Default seit V19-FIX-12: 0.05)
     params = {"registration": {"method": "astroalign",
                                "max_control_points": None,
                                "zero_shift_threshold": 0.3}}
@@ -2047,7 +2048,7 @@ def test_cross_group_zero_shift_guard_rejects_astroalign_winner(
     ref = _write_2d_frame(tmp_path / "ref.fits", img)
     tgt = _write_2d_frame(tmp_path / "tgt.fits", img)
     agent = _make_agent(tmp_path / "out")
-    # explizit hohe Schwelle (Default seit V1.3-1: 0.0)
+    # explizit hohe Schwelle (Default seit V19-FIX-12: 0.05)
     params = {"registration": {"method": "astroalign",
                                "max_control_points": None,
                                "zero_shift_threshold": 0.3}}
@@ -2336,10 +2337,8 @@ def test_merge_agent_reference_only_insufficient_stacks(
 ):
     """P2-1 (ray-Review, Cross-Group-Teil): Referenz-only-Merge — nur der
     Referenz-Stack vorhanden (alle Nicht-Referenz-Stacks per
-    `registration.stack_rejected`/RE-F ausgeschlossen) -> MergeAgent-Guard
-    (< 2 Stacks): merged_path=None, merge_report {"error":
-    "insufficient_stacks"}, Warning `merge.insufficient_stacks`. Kein Crash.
-    Belegt das Merge-Verhalten bei 1 Stack (W3-aligned_stacks == {ref})."""
+    `registration.stack_rejected`/RE-F ausgeschlossen) -> V1.9.1 FIX-11:
+    merge.single_stack_fallback (Warnung statt hart Skip, merged aus 1 Stack)."""
     import astro_process.agents.merge_agent as merge_agent_module
 
     rec = _LogRecorder()
@@ -2360,9 +2359,10 @@ def test_merge_agent_reference_only_insufficient_stacks(
         merge_config=MergeConfig(),
     )
 
-    assert result.merged_path is None
-    assert result.merge_report == {"error": "insufficient_stacks"}
-    assert "merge.insufficient_stacks" in rec.names
+    assert result.merged_path is not None
+    assert result.merged_path.exists()
+    assert "error" not in result.merge_report
+    assert "merge.single_stack_fallback" in rec.names
 
 
 def test_multi_group_all_cross_group_rejected_reference_only_merge(
@@ -2434,7 +2434,7 @@ def test_multi_group_all_cross_group_rejected_reference_only_merge(
         )
 
     assert proc_result is not None  # kein Crash
-    assert proc_result.stacked is None  # Referenz-only -> Merge-Guard
+    assert proc_result.stacked is not None  # V1.9.1 FIX-11: Referenz-only -> single_stack_fallback mit merged
     # Beide Gruppen registriert/gestackt; Cross-Group nur fuer die
     # Nicht-Referenz-Gruppe (15s60)
     assert mock_stack.call_count == 2, mock_stack.call_count

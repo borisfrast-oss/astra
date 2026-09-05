@@ -460,12 +460,19 @@ def apply_cross_group_skip_filter(
             kept[group_hash] = path
             continue
 
-        if corr_hp < min_correlation:
+        # V19-FIX-11 P0 Gate Duo-Band: Duo-Band hat naturgemäß low corr_roh (~0.001), und 0.05 statt 0.1 ist sinnvoll
+        is_duo = False
+        if group_metadata is not None:
+            _f = (group_metadata.get(group_hash) or {}).get("filter")
+            if _f is not None and "duo" in str(_f).lower():
+                is_duo = True
+        effective_min = 0.05 if is_duo else min_correlation
+        if corr_hp < effective_min:
             entry_skip = {
                 "group": group_hash,
                 "reason": "below_min_correlation",
                 "corr_hp": corr_hp,
-                "min_correlation": min_correlation,
+                "min_correlation": effective_min,
             }
             # W7-Erweiterung (AC-W7-2): preview_path relativ zum
             # generated/{ts}-Ordner (VOR dem Skip-Filter aus stacked.fits).
@@ -481,7 +488,7 @@ def apply_cross_group_skip_filter(
             skipped_groups.append(entry_skip)
             log.warning("multi_group.skip_below_min_correlation",
                         group=group_hash, corr_hp=corr_hp,
-                        min_correlation=min_correlation)
+                        min_correlation=effective_min)
         else:
             # V1.4-20 (LDN 935) + V1.4-21 (M13): Mehrmesswert-Gate.
             # corr_hp allein kann eine falsche Transformation durchlassen
@@ -511,7 +518,13 @@ def apply_cross_group_skip_filter(
                     "n_control_points": n_cp,
                     "rotation_deg": round(rotation_deg, 6),
                 }
-                if corr_roh < 0.05:
+                # V19-FIX-11: Duo-Band ignoriert low_corr_roh (nur corr_hp werten) — Narrowband wenig Kontinuum → corr_roh ~0.001 normal
+                _is_duo_for_roh = False
+                if group_metadata is not None:
+                    _ff = (group_metadata.get(group_hash) or {}).get("filter")
+                    if _ff is not None and "duo" in str(_ff).lower():
+                        _is_duo_for_roh = True
+                if not _is_duo_for_roh and corr_roh < 0.05:
                     quality_reasons.append("low_corr_roh")
                 if n_cp is not None and n_cp < 30:
                     quality_reasons.append("few_control_points")

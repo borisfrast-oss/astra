@@ -142,7 +142,16 @@ CLI_HELP_EN: dict[str, str] = {
     "Min SNR (Default: 10, CFA-Smart: 5) [advanced]": "Min SNR (default: 10, CFA-Smart: 5) [advanced]",
     "Min Correlation (Default: 0.3, CFA-Smart: 0.1) [advanced]": "Min correlation (default: 0.3, CFA-Smart: 0.1) [advanced]",
     "FWHM Range als 'min,max' (Default: 1.5,5.0, CFA-Smart: 1.0,8.0) [advanced]": "FWHM range as 'min,max' (default: 1.5,5.0, CFA-Smart: 1.0,8.0) [advanced]",
-    "Photometric Color Calibration aktivieren/deaktivieren (ueberschreibt Preset/Config; Default: Preset/Config gewinnt)": "Enable or disable photometric color calibration (overrides preset/config; default: preset/config wins)",
+     "Photometric Color Calibration aktivieren/deaktivieren (ueberschreibt Preset/Config; Default: Preset/Config gewinnt)": "Enable or disable photometric color calibration (overrides preset/config; default: preset/config wins)",
+    # SUG-1: suggest command help
+    "Suggest a preset/registration/debayer/PCC combination for TARGET.\n\n    Offline-first advisor (Header > target-cache > SIMBAD > Handbook 22):\n    the local target-cache always wins; SIMBAD is only queried on a cache\n    miss and only if the network is reachable (5s timeout, 1 query). On\n    failure it degrades to a generic 2-option fallback with a warning —\n    never a crash, always Exit 0 (see suggest.simbad_unavailable).\n\n    This command is an ADVISOR, not a decider: it never runs `process` by\n    itself and `process` never reads its output unless you pass the\n    explicit `--from-suggested <file>` flag.\n\n    Examples:\n        astra suggest M31\n        astra suggest M27 --header C:/Astra/M27/light_0001.fits\n        astra suggest C19 --json --output C:/Astra/C19/suggested.yaml\n        astra suggest M31 --output\n    ": "Suggest a preset, registration method, debayer method, and PCC settings for a target. Offline-first advisor (Header > target-cache > SIMBAD > Handbook): HEADER wins over TARGET; target-cache (stella-maintained) always wins over SIMBAD; SIMBAD only queried on cache miss if network available (5s timeout). On failure: generic fallback + warning, never crash, always Exit 0. Output writes to stdout (human-readable) or --json (machine-readable). Optional --output writes suggested_parameters to YAML/JSON file (default: C:/Astra/<Target>/suggested.yaml). This command is an ADVISOR (never runs process); process reads file only via explicit --from-suggested flag. Examples: astra suggest M31; astra suggest M27 --header C:/Astra/M27/light_0001.fits; astra suggest C19 --json --output C:/Astra/C19/suggested.yaml",
+    # SUG-1 flag helps
+    "Read OBJECT/FILTER/EXPTIME/TELESCOP/DET-TEMP from a local FITS header (local only, no cloud). OBJECT wins over TARGET when both are given (suggest.header_overrides_target warning).": "Read OBJECT, FILTER, EXPTIME, TELESCOP, DET-TEMP from a local FITS file header (local only, no cloud). If both --header and TARGET are given, OBJECT from the header takes precedence over TARGET.",
+    "Fallback RA/DEC (decimal degrees) when TARGET/--header do not resolve a cache hit. Used only for SIMBAD lookup / labeling; suggest never plate-solves.": "Fallback right ascension and declination (RA DEC in decimal degrees) when target name or FITS OBJECT header do not resolve a cache hit. Coordinates are used only for SIMBAD lookup and result labeling; suggest never performs plate-solving.",
+    "Write suggested_parameters as YAML (default) or JSON (.json suffix). Without a path, defaults to C:/Astra/<Target>/suggested.yaml (Target-Root, next to Lights). Always overwrites (no auto-history).": "Write suggested_parameters to a file as YAML (default format) or JSON (if path ends with .json). Without a path argument, defaults to C:/Astra/<Target>/suggested.yaml in the target root (next to Lights directory). Always overwrites previous suggestions; no auto-history (use explicit timestamped filenames for history).",
+    "Print the machine-readable JSON suggestion to stdout instead of the human-readable text.": "Print the machine-readable JSON suggestion to stdout (in addition to or instead of human-readable text).",
+    # SUG-5: --from-suggested flag help
+    "Load preset/registration/debayer/pcc from a suggested_parameters file (see 'astra suggest --output'). Precedence: CLI flags > file > config > preset > default; no auto-discover without this flag.": "Load preset, registration method, debayer method, and PCC settings from a suggested_parameters file (see 'astra suggest --output', default location: C:/Astra/<Target>/suggested.yaml in the target root). Precedence: CLI flags > suggested file > config > preset > defaults. Without this flag, process never reads suggested files (no auto-discover).",
 }
 
 # English summaries for source symbols rendered in architecture / feature docs.
@@ -324,7 +333,9 @@ CONFIG_FIELD_EN: dict[str, str] = {
     "FrameSelectionConfig.enabled": "Enable automatic frame selection by quality metrics.",
     "FrameSelectionConfig.keep_percentile": "Percentile of frames to keep (1-100).",
     "FrameSelectionConfig.weights": "Per-metric weights used to compute the quality score.",
-    "FrameSelectionConfig.min_frames": "Minimum number of frames that must remain after selection.",
+     "FrameSelectionConfig.min_frames": "Minimum number of frames that must remain after selection.",
+    # SuggestConfig (V19-TARGET-ADVISOR SUG-6)
+    "SuggestConfig.target_cache_path": "Optional path to a local target-cache.md file (e.g., knowledge-base/agents/stella/target-cache.md). If not set, every target is a cache miss: suggest queries SIMBAD (if online) or falls back to generic preset advice with a warning; no crash, always Exit 0 (AC-SUG-4). Used offline to resolve target names to presets without requiring network access.",
 }
 
 
@@ -938,6 +949,7 @@ def gen_presets_doc() -> None:
     writer.h1("Presets")
     writer.p("> Auto-generated from `config.yaml` `pipeline_presets`")
     writer.hr()
+    writer.p("**Choosing a preset?** Run `astra suggest <TARGET>` to get offline recommendations based on object type (galaxy/nebula/star) from the handbook and target-cache. See Handbook Ch. 17 and `03-cli-reference.md suggest` for details.")
     data = load_yaml(CONFIG_YAML)
     presets = data.get("pipeline_presets", [])
     for preset in presets:

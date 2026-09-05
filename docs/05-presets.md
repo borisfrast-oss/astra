@@ -4,6 +4,8 @@
 
 ---
 
+**Choosing a preset?** Run `astra suggest <TARGET>` to get offline recommendations based on object type (galaxy/nebula/star) from the handbook and target-cache. See Handbook Ch. 17 and `03-cli-reference.md suggest` for details.
+
 ## galaxy_standard
 
 **Target Types:** galaxy
@@ -51,6 +53,7 @@
 | weight | noise |
 | stretch_method | asinh |
 | stretch_factor | 0.12 |
+| preview_export | {'scnr': True, 'background_neutralization': True, 'saturatio |
 
 ## star_standard
 
@@ -95,6 +98,57 @@
 | rejection | winsorized |
 | normalization | mul |
 | weight | noise |
+| preview_export | {'scnr': True, 'background_neutralization': True, 'saturatio |
+
+## nebula_bilinear
+
+**Target Types:** nebula_bilinear
+
+| Step | Params |
+| --- | --- |
+| create_master_dark | - |
+| calibrate_lights | - |
+| register_frames | - |
+| stack_frames | - |
+| gradient_removal | - |
+| background_extraction | - |
+| structure_enhancement | - |
+| stretch | - |
+| export | - |
+
+| Param | Value |
+| --- | --- |
+| debayer_method | bilinear |
+| rejection | winsorized |
+| normalization | mul |
+| weight | noise |
+| stretch_method | asinh |
+| stretch_factor | 0.12 |
+
+## galaxy_bilinear
+
+**Target Types:** galaxy_bilinear
+
+| Step | Params |
+| --- | --- |
+| create_master_dark | - |
+| calibrate_lights | - |
+| register_frames | - |
+| stack_frames | - |
+| background_extraction | - |
+| photometric_color_calibration | - |
+| scnr | - |
+| stretch | - |
+| export | - |
+
+| Param | Value |
+| --- | --- |
+| debayer_method | bilinear |
+| rejection | winsorized |
+| normalization | mul |
+| weight | noise |
+| stretch_method | asinh |
+| stretch_factor | 0.15 |
 
 ## PCC Flag — Use Cases (V19-PCC-FLAG)
 

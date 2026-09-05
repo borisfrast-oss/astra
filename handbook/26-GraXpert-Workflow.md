@@ -1,398 +1,396 @@
-# Kapitel 26 – GraXpert Workflow
+# 26 – GraXpert Workflow
 
-# Dwarf 3 + Siril 1.4.4 + GraXpert + GIMP 3.2.4 Best Practices Handbuch
-
----
-
-# Ziel
-
-Dieses Kapitel beschreibt den Einsatz von GraXpert in einem Dwarf-3-Astrofotografie-Workflow.
-
-GraXpert ist kein allgemeines Bildbearbeitungsprogramm.
-
-Die Hauptaufgabe:
-
-**künstliche Hintergrundgradienten entfernen, ohne astronomisches Signal zu zerstören.**
+# Dwarf mini + Siril 1.4.4 + GraXpert + GIMP 3.2.4 Best Practices Handbook
 
 ---
 
-# 1. Rolle von GraXpert im Workflow
+# Objective
 
-Empfohlene Reihenfolge:
+This chapter describes using GraXpert in a Dwarf mini astrophotography workflow.
+
+GraXpert is not a general image editor.
+
+Main task:
+
+**Remove artificial background gradients without destroying astronomical signal.**
+
+---
+
+# 1. Role of GraXpert in Workflow
+
+Recommended order:
 
 ```
 
-Dwarf 3
+Dwarf mini
 
 ↓
 
 Siril
 
-Kalibrierung
+Calibration
 
-Registrierung
+Registration
 
 Stack
 
-Farbkorrektur
+Color correction
 
 ↓
 
 GraXpert
 
-Gradienten entfernen
+Remove gradients
 
 ↓
 
 GIMP
 
-Finale Bearbeitung
+Final processing
 
 ```
 
 ---
 
-# 2. Wann GraXpert verwenden?
+# 2. When to Use GraXpert?
 
-Sinnvoll bei:
+Makes sense for:
 
-- Lichtverschmutzung
-- ungleichmäßigem Hintergrund
-- Vignettierung
-- Mondlicht
-- Aufnahmen in Städten
-
----
-
-Besonders hilfreich:
-
-- Galaxien
-- schwache Nebel
-- Milchstraße
-- große Sternfelder
+- Light pollution
+- Uneven background
+- Vignetting
+- Moonlight
+- Urban images
 
 ---
 
-# 3. Wann vorsichtig sein?
+Especially helpful for:
 
-Problematisch bei:
-
-- großen Reflexionsnebeln
-- sehr schwachen Nebeln
-- großen diffusen Strukturen
-
-Beispiele:
-
-- M45 Plejaden
-- Irisnebel
-- Cirrusnebel
+- Galaxies
+- Faint nebulae
+- Milky Way
+- Large star fields
 
 ---
 
-Grund:
+# 3. When to Be Careful?
 
-GraXpert erkennt Nebel nicht immer als Objekt.
+Problematic for:
 
-Es kann echte Strukturen als Hintergrund interpretieren.
+- Large reflection nebulae
+- Very faint nebulae
+- Large diffuse structures
+
+Examples:
+
+- M45 Pleiades
+- Iris Nebula
+- Cirrus Nebula
 
 ---
 
-# 4. Vorbereitung
+Reason:
 
-Vor GraXpert:
+GraXpert doesn't always recognize nebulae as objects.
 
-Das Bild sollte bereits:
+It can interpret real structures as background.
 
-- kalibriert
-- registriert
-- gestackt
+---
 
-sein.
+# 4. Preparation
 
-Empfohlener Zustand:
+Before GraXpert:
+
+Image should already be:
+
+- Calibrated
+- Registered
+- Stacked
+
+Recommended state:
 
 ```
 
-Linear oder leicht gestreckt
-
-```id="6rm2bw"
-
----
-
-Nicht ideal:
-
-stark bearbeitetes JPEG.
-
----
-
-# 5. Export aus Siril
-
-Empfehlung:
+Linear or slightly stretched
 
 ```
 
-TIFF 16 Bit
+---
 
-```id="7v0a3f"
+Not ideal:
 
-oder:
+Heavily processed JPEG.
+
+---
+
+# 5. Export from Siril
+
+Recommendation:
+
+```
+
+TIFF 16-bit
+
+```
+
+Or:
 
 ```
 
 FITS
 
-```id="8d0v4e"
+```
 
 ---
 
-Für maximale Datenqualität:
+For maximum data quality:
 
-FITS bevorzugt.
-
----
-
-# 6. Modellwahl
-
-GraXpert verwendet ein mathematisches Modell des Hintergrunds.
+FITS preferred.
 
 ---
 
-# 6.1 Einfacher Hintergrund
+# 6. Model Selection
 
-Geeignet:
+GraXpert uses a mathematical model of the background.
 
-- kleine Gradienten
-- leichte Lichtverschmutzung
+---
 
-Empfehlung:
+# 6.1 Simple Background
+
+Suitable for:
+
+- Small gradients
+- Light light pollution
+
+Recommendation:
 
 ```
 
 Degree 1
 
-```id="7c2q9f"
+```
 
 ---
 
-# 6.2 Komplexer Hintergrund
+# 6.2 Complex Background
 
-Geeignet:
+Suitable for:
 
-- Stadtlicht
-- Mondgradient
-- starke Unterschiede
+- City light
+- Moon gradient
+- Strong differences
 
-Empfehlung:
+Recommendation:
 
 ```
 
 Degree 2
 
-```id="0y3c5b"
+```
 
 ---
 
-Höhere Grade:
+Higher degrees:
 
-nur verwenden, wenn notwendig.
-
----
-
-# 7. Hintergrundpunkte setzen
-
-Das ist der wichtigste Schritt.
+Only use if necessary.
 
 ---
 
-Regel:
+# 7. Set Background Points
 
-Punkte nur setzen auf:
+This is the most important step.
+
+---
+
+Rule:
+
+Place points only on:
 
 ```
 
-echten Hintergrund
+True background
 
-```id="a6m9tv"
-
----
-
-Nicht setzen auf:
-
-- Sterne
-- Nebel
-- Galaxien
-- helle Strukturen
+```
 
 ---
 
-# 8. Beispiel M31
+Do not place on:
 
-Richtig:
-
-Punkte:
-
-- dunkle Bereiche außerhalb der Galaxie
-
-Falsch:
-
-- Spiralarme
-- Kernbereich
+- Stars
+- Nebulae
+- Galaxies
+- Bright structures
 
 ---
 
-# 9. Beispiel Emissionsnebel
+# 8. Example M31
+
+Correct:
+
+Points:
+
+- Dark areas outside galaxy
+
+Incorrect:
+
+- Spiral arms
+- Core region
+
+---
+
+# 9. Example Emission Nebula
 
 Problem:
 
-Der Nebel kann große Teile des Bildes bedecken.
+Nebula can cover large parts of image.
 
 ---
 
-Regel:
+Rule:
 
-Sehr wenige Punkte.
+Very few points.
 
-Nicht:
+Do not:
 
-den gesamten Nebel als Hintergrund behandeln.
-
----
-
-# 10. Beispiel M45 Plejaden
-
-Besonders schwierig.
-
-Der blaue Reflexionsnebel ist großflächig.
+Treat entire nebula as background.
 
 ---
 
-Empfehlung:
+# 10. Example M45 Pleiades
 
-- wenig Korrektur
-- nur offensichtliche Gradienten entfernen
+Especially difficult.
 
----
-
-# 11. Stärke der Korrektur
-
-Grundregel:
-
-So wenig wie möglich.
+Blue reflection nebula is large.
 
 ---
 
-Zu stark:
+Recommendation:
 
-Folgen:
-
-- Nebel verschwindet
-- Farbverläufe werden unnatürlich
-- Hintergrund wirkt künstlich
+- Little correction
+- Only remove obvious gradients
 
 ---
 
-Gut:
+# 11. Strength of Correction
 
-Der Unterschied ist sichtbar, aber nicht dramatisch.
+Basic rule:
+
+As little as possible.
+
+---
+
+Too strong:
+
+Consequences:
+
+- Nebula disappears
+- Color gradients become unnatural
+- Background looks artificial
+
+---
+
+Good:
+
+Difference is visible but not dramatic.
 
 ---
 
 # 12. AI-Denoise in GraXpert
 
-GraXpert besitzt auch Entrauschung.
+GraXpert also includes denoising.
 
 ---
 
-Empfehlung:
+Recommendation:
 
-Bei Dwarf-Daten vorsichtig.
-
----
-
-Warum:
-
-Kleine Sensoren erzeugen feine Strukturen, die ähnlich aussehen können wie Rauschen.
+Be cautious with Dwarf data.
 
 ---
 
-Zu stark:
+Why:
 
-entfernt:
-
-- Nebelfilamente
-- schwache Sterne
-- Staubstrukturen
+Small sensors generate fine structures that can look similar to noise.
 
 ---
 
-# 13. Vergleich vor/nach GraXpert
+Too strong:
 
-Immer prüfen:
+removes:
 
-Vorher:
-
-- Wo ist Signal?
-
-Nachher:
-
-- Ist Signal noch vorhanden?
+- Nebular filaments
+- Faint stars
+- Dust structures
 
 ---
 
-Nicht nur auf schönen Hintergrund achten.
+# 13. Before/After Comparison with GraXpert
+
+Always check:
+
+Before:
+
+- Where is the signal?
+
+After:
+
+- Is the signal still present?
 
 ---
 
-# 14. Typische Probleme
+Do not focus only on a clean background.
 
 ---
 
-## Problem: Nebel wurde entfernt
-
-Ursachen:
-
-- zu viele Punkte
-- falsche Punkte
-- Modell zu komplex
-
-Lösung:
-
-- weniger Punkte
-- niedrigerer Grad
-- Original vergleichen
+# 14. Common Problems
 
 ---
 
-## Problem: Hintergrund ist fleckig
+## Problem: Nebula was removed
 
-Ursachen:
+Causes:
 
-- zu wenige Punkte
-- falsches Modell
+- Too many points
+- Wrong points
+- Model too complex
 
-Lösung:
+Solution:
 
-- mehr gleichmäßig verteilte Hintergrundpunkte
-
----
-
-## Problem: Sterne wirken verändert
-
-Ursachen:
-
-- falsche Anwendung auf stark gestrecktes Bild
-
-Lösung:
-
-- vor Stretch anwenden
+- Fewer points
+- Lower degree
+- Compare with original
 
 ---
 
-# 15. Empfohlener Workflow nach Objektklasse
+## Problem: Background is spotty
+
+Causes:
+
+- Too few points
+- Wrong model
+
+Solution:
+
+- More evenly distributed background points
 
 ---
 
-## Galaxien
+## Problem: Stars appear changed
+
+Causes:
+
+- Incorrect application on heavily stretched image
+
+Solution:
+
+- Apply before stretching
+
+---
+
+# 15. Recommended Workflow by Object Class
+
+---
+
+## Galaxies
 
 ```
 
@@ -418,7 +416,7 @@ GIMP
 
 ---
 
-## Emissionsnebel
+## Emission Nebulae
 
 ```
 
@@ -426,7 +424,7 @@ Siril Stack
 
 ↓
 
-GraXpert vorsichtig
+GraXpert cautiously
 
 ↓
 
@@ -440,7 +438,7 @@ GIMP
 
 ---
 
-## Reflexionsnebel
+## Reflection Nebulae
 
 ```
 
@@ -448,7 +446,7 @@ Siril Stack
 
 ↓
 
-sehr vorsichtig GraXpert
+GraXpert very cautiously
 
 ↓
 
@@ -462,7 +460,7 @@ GIMP
 
 ---
 
-## Milchstraße
+## Milky Way
 
 ```
 
@@ -486,114 +484,114 @@ GIMP
 
 # 16. Siril Background Extraction vs GraXpert
 
-Beide machen ähnliche Dinge.
+Both accomplish similar tasks.
 
 ---
 
 ## Siril Background Extraction
 
-Vorteile:
+Advantages:
 
-- integriert
-- schnell
-- ausreichend für viele Fälle
+- integrated
+- fast
+- sufficient for many cases
 
 ---
 
 ## GraXpert
 
-Vorteile:
+Advantages:
 
-- oft bessere Gradientenerkennung
-- einfacher zu kontrollieren
-- besonders gut bei komplexen Gradienten
-
----
-
-Empfehlung:
-
-Nicht immer beide maximal verwenden.
+- often better gradient recognition
+- easier to control
+- especially good for complex gradients
 
 ---
 
-# 17. Kombinationsregel
+Recommendation:
 
-Nicht:
+Do not use both aggressively.
+
+---
+
+# 17. Combination Rule
+
+Not:
 
 ```
 
-Siril aggressiv
+Siril aggressive
 
 *
 
-GraXpert aggressiv
+GraXpert aggressive
 
 *
 
-GIMP Kontrast extrem
+GIMP contrast extreme
 
 ```
 
 ---
 
-Besser:
+Better:
 
 ```
 
-Siril leicht
+Siril light
 
 ↓
 
-GraXpert leicht
+GraXpert light
 
 ↓
 
-GIMP kontrolliert
+GIMP controlled
 
 ```
 
 ---
 
-# 18. Qualitätskontrolle
+# 18. Quality Control
 
-Nach GraXpert prüfen:
+After GraXpert check:
 
-- Sind Nebelfilamente noch vorhanden?
-- Sind Sterne unverändert?
-- Ist der Hintergrund natürlicher?
-- Gibt es neue Artefakte?
+- Are nebular filaments still present?
+- Are stars unchanged?
+- Is the background more natural?
+- Are there new artifacts?
 
 ---
 
-# 19. Standard Dwarf-3 GraXpert Einstellungen
+# 19. Standard Dwarf mini GraXpert Settings
 
-Ausgangspunkt:
+Starting point:
 
 ```
 
-Modell:
+Model:
 Degree 1–2
 
-Stärke:
-moderat
+Strength:
+moderate
 
-Punkte:
-nur Hintergrund
+Points:
+background only
 
 Denoise:
-niedrig oder aus
+low or off
 
 ```
 
 ---
 
-# 20. Wichtigste Regel
+# 20. Most Important Rule
 
-GraXpert soll den Hintergrund verbessern.
+GraXpert should improve the background.
 
-Es soll nicht das Bild verändern.
+It should not change the image.
 
-Wenn der Unterschied zwischen vorher und nachher extrem ist:
+If the difference between before and after is extreme:
 
-war die Korrektur wahrscheinlich zu stark.
+the correction was probably too strong.
 

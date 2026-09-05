@@ -352,14 +352,77 @@ def test_ac_cli_f3_doctor_fix(tmp_path):
     cfg["data_root"] = str(missing_root)
     cfg["darks_repository"] = str(tmp_path / "MissingDarks")
     cfg_path.write_text(yaml.safe_dump(cfg))
-    # First doctor without fix should warn
-    result = runner.invoke(cli, ["--config", str(cfg_path), "doctor"])
-    assert result.exit_code in (1, 2, 0)  # may be warn
-    # Now fix
-    result2 = runner.invoke(cli, ["--config", str(cfg_path), "doctor", "--fix"])
-    assert result2.exit_code in (0, 1, 2)
-    assert "FIX" in result2.output or "fix" in result2.output.lower() or "Dir erstellt" in result2.output
-    assert missing_root.exists() or (tmp_path / "MissingDarks").exists() or "Created" in result2.output or "Config" in result2.output
+    # V19-1.9.2-STRAYCFG Fix B: isolated_filesystem verhindert CWD-Stray bei doctor --fix (Muster sauberer Pendants)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        # First doctor without fix should warn
+        result = runner.invoke(cli, ["--config", str(cfg_path), "doctor"])
+        assert result.exit_code in (1, 2, 0)  # may be warn
+        # Now fix
+        result2 = runner.invoke(cli, ["--config", str(cfg_path), "doctor", "--fix"])
+        assert result2.exit_code in (0, 1, 2)
+        assert "FIX" in result2.output or "fix" in result2.output.lower() or "Dir erstellt" in result2.output
+        assert missing_root.exists() or (tmp_path / "MissingDarks").exists() or "Created" in result2.output or "Config" in result2.output
+
+
+def test_ac_cli_f3_doctor_fix_writes_to_explicit_cfg_path(tmp_path):
+    """Flip-Garantie fuer V19-1.9.2-STRAYCFG Fix C (Ray-Review @1a87a59, Finding A2).
+
+    Ray-Review-Befund: test_ac_cli_f3_doctor_fix (oben) ruft cfg_path.write_text(...)
+    VOR doctor --fix auf. Damit ist target_cfg (== Path(cfg_path)) im Guard
+    `if not target_cfg.exists()` in cli.py IMMER bereits vorhanden -> der
+    Guard wird NIE mit False-Zweig verlassen -> Fix C (target_cfg = Path(cfg_path)
+    statt blind Path.cwd()/"config.yaml") wird von diesem Test nie tatsaechlich
+    exerciert. Ein Test der bei altem UND neuem Code gruen bleibt, hat keine
+    Flip-Garantie (Lesson 9).
+
+    Hinweis zur Testkonstruktion: Ein woertlicher "--config auf nicht
+    existierenden Pfad" (wie urspruenglich skizziert) ist mit der aktuellen
+    CLI nicht moeglich, da die globale --config Option als
+    `click.Path(exists=True)` deklariert ist (cli.py Zeile ~302) - click
+    lehnt einen nicht existierenden Pfad bereits beim Options-Parsing mit
+    Exit-Code 2 ab, BEVOR doctor() ueberhaupt laeuft (empirisch verifiziert:
+    runner.invoke(cli, ["--config", str(nonexistent), "doctor", "--fix"])
+    -> exit_code == 2, "Path '...' does not exist."). Der eigentliche Bug
+    (Ray A2) liegt nicht darin, cfg_path fehlen zu lassen, sondern darin,
+    dass die ALTE Implementierung `cfg_path` komplett ignorierte und
+    stattdessen blind `Path.cwd() / "config.yaml"` verwendete - das erzeugt
+    einen Stray im isolierten CWD, obwohl ein gueltiger --config Pfad
+    ausserhalb des CWD existiert. Diese Variante exerciert exakt das:
+    cfg_path existiert (erfuellt click exists=True) und liegt AUSSERHALB
+    des isolierten CWD-Baums (Sibling-Verzeichnis unter tmp_path).
+
+    Flip-Beweis (empirisch gegen den echten Code verifiziert, S9):
+    - NEUER Code (target_cfg = Path(cfg_path), da cfg_path is not None):
+      target_cfg == cfg_path, existiert bereits -> Guard False -> kein
+      save_default_config()-Aufruf -> isolierter CWD-Baum bleibt frei von
+      "config.yaml" (STRAYS == []). GRUEN mit diesem Test.
+    - ALTER Code (pre-8105cc2: `cwd_cfg = Path.cwd() / "config.yaml"`,
+      cfg_path wird nicht mal gelesen): cwd_cfg liegt im (leeren) isolierten
+      CWD, existiert dort NICHT -> Guard True -> save_default_config(cwd_cfg)
+      wird aufgerufen -> Stray "config.yaml" landet im isolierten CWD-Baum
+      (STRAYS enthaelt genau diese Datei) -> Assertion unten wuerde ROT.
+      (Reproduziert per Ad-hoc-Skript mit derselben cwd_cfg-Formel wie im
+      vor-8105cc2-Diff: erzeugt nachweislich einen Stray im isolierten Baum.)
+    """
+    runner = CliRunner()
+    cfg_path = tmp_path / "config.yaml"
+    missing_root = tmp_path / "MissingRoot"
+    cfg = yaml.safe_load(DEFAULT_CONFIG)
+    cfg["data_root"] = str(missing_root)
+    cfg_path.write_text(yaml.safe_dump(cfg))
+    # isolated_filesystem(temp_dir=tmp_path) legt einen FRISCHEN, LEEREN
+    # CWD-Unterordner an, der ein Sibling von cfg_path ist (nicht dessen
+    # Parent-Verzeichnis) -> genau das Setup, in dem die alte
+    # Path.cwd()/"config.yaml"-Logik einen Stray erzeugen wuerde, die neue
+    # cfg_path-Logik aber nicht.
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(cli, ["--config", str(cfg_path), "doctor", "--fix"])
+        assert result.exit_code in (0, 1, 2), result.output
+        # Fix C: kein zusaetzliches config.yaml im isolierten CWD-Baum.
+        strays = list(Path(".").rglob("config.yaml"))
+        assert strays == [], f"Stray config.yaml im isolierten CWD gefunden: {strays}"
+    # cfg_path selbst bleibt unveraendert vorhanden (wurde nicht ueberschrieben).
+    assert cfg_path.exists()
 
 
 # ─── DOCS-A ───────────────────────────────────────────────────────────

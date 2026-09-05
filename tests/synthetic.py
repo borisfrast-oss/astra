@@ -869,11 +869,13 @@ def generate_az_field_rotation_analog(
       (AC-RE-F2: der Guard darf nicht mit dem SanityGuard kollidieren).
     - Subpixel-Shifts (0.3, -0.7) etc.: fft auf dem Integer-Grid verfehlt
       die Subpixel-Komponente, astroalign gewinnt die Arbitration
-      (W9-C) auf jedem Frame (keine Downgrades bei Default-Schwelle 0.0).
+      (W9-C) auf jedem Frame (keine Downgrades bei Default-Schwelle 0.05,
+      V19-FIX-12).
 
     W1-Guard-Verhalten (RE-F) auf dieser Szene:
-    - Default ``zero_shift_threshold=0.0``: corr_hp_aa ~0.43-0.48 > 0.0 ->
-      astroalign registriert normal (kein Reject).
+    - Default ``zero_shift_threshold=0.05`` (V19-FIX-12 P1 Mandatory Gate):
+      corr_hp_aa ~0.43-0.48 > 0.05 -> astroalign registriert normal (kein
+      Reject).
     - ``zero_shift_threshold=0.5``: corr_hp_aa < 0.5 -> JEDER Nicht-Referenz-
       Frame wird verworfen (``registration.frame_rejected``,
       len(registered) == 1 = nur Referenz) — die kalibrierte Schwelle

@@ -88,7 +88,7 @@ Astra ships two documentation sets:
 | Directory | Purpose |
 |-----------|---------|
 | **`docs/`** | **Pipeline documentation (SSOT)** — how to operate the pipeline. 12 files generated from source via `scripts/generate_docs.py`. Start with `docs/01-quickstart.md`. |
-| **`handbook/`** | Dwarf3 + Siril **tutorial** — learn the astrophotography craft (Siril workflow, image acquisition). Not pipeline-operation docs. |
+| **`handbook/`** | Dwarf mini + Siril **tutorial** — learn the astrophotography craft (Siril workflow, image acquisition). Not pipeline-operation docs. |
 
 Key `docs/` files:
 

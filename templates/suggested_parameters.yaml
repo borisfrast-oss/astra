@@ -1,0 +1,41 @@
+# suggested_parameters.yaml — Template for `astra suggest --output`
+# Source: astra/templates/suggested_parameters.yaml (repo template, cleanly commented)
+# Filled in by `astra suggest <TARGET> --output C:/Astra/<Target>/suggested.yaml`
+#   -> HEADER (TELESCOP/FILTER/EXPTIME/OBJECT) + target-cache.md (stella) + SIMBAD webfetch (on cache miss) + Handbook 22 (+ Ch.17) as rule basis (SSOT)
+# Schema version 1, extensible, extra="ignore" — unknown keys are tolerated (the pipeline ignores them).
+# handbook_ref examples (minors C19 06+07):
+#   M31 Galaxy (spiral): "22 §3 Galaxies + 05-Galaxies.md" -> galaxy_standard
+#   M27 Planetary nebula (OIII 6.7'): "22 §4 + 08-Planetary-Nebulae.md" -> nebula_standard (nebula_narrowband only when Filter=Narrowband/Duo-Band + OIII target, e.g. M27 6.7' OIII, C27 WR136, otherwise nebula_standard)
+#   C27 WR nebula WR136: "22 §4 + 08" -> nebula_narrowband only with Narrowband/Duo-Band + OIII target
+#   C19 Cocoon nebula IC5146: "22 §4/§5 + 06-Emission-Nebulae.md + 07-Reflection-Nebulae.md" -> nebula_standard (handbook_ref "06+07")
+#   Open cluster (e.g. IC 1311, 6x cache star_standard): "22 §6 + 10-Open-Clusters.md" -> star_standard | Ch.10 | Ch.22 §6
+#   Globular cluster M13: "22 §6 + 09-Globular-Clusters.md" -> star_standard
+# Debayer mandatory text CFA-GATE (M-3): cfa-drizzle = only after quality-gate pass + doc hint that "auto" remains a pipeline decision, suggest only recommends.
+#   V19-CFA-GATE: star_count 1 vs 20, quality gate, dithering detection, >50 dithered frames; pipeline chooses auto at the end, suggest only marks a suggestion.
+# Fallback (unknown target without cache/SIMBAD, offline): suggest returns a generic star+nebula pair — nebula_standard + galaxy_standard with a hint "check SIMBAD/extend the cache"
+
+version: 1
+target: M31  # Example: M31 Andromeda — folder name / TARGET string (OBJECT header wins over TARGET when --header is given)
+simbad_name: M31  # SIMBAD resolution (e.g. M31=NGC224, C19=IC5146, M27=NGC6853)
+type: galaxy  # galaxy | nebula | planetary | globular | open_cluster | star | dark_nebula | snr — from target-cache.md / SIMBAD otype
+handbook_ref: "22 §3 Galaxies + 05-Galaxies.md"  # C19 -> "22 §4/§5 + 06+07", open cluster -> "22 §6 + 10", M27 -> "22 §4 + 08"
+source: cache  # cache | header | simbad | handbook_fallback — origin of the recommendation (offline-first: cache wins)
+preset: galaxy_standard  # galaxy_standard | nebula_standard | star_standard | nebula_narrowband (the latter only when Filter=Narrowband/Duo-Band + OIII target, otherwise nebula_standard — M-2)
+
+registration:
+  method: astroalign  # fft | astroalign | rotation_fft — AZ (dwarf_mini -> 15°, generic AZ -> 30°) vs EQ (<120s fft, >120s astroalign)
+  max_rotation_deg: 30  # 2 (EQ fft) | 15 (dwarf_mini) | 30 (generic AZ) — from EquipmentProfile / V19-REG-SMART
+
+debayer:
+  method: superpixel  # superpixel (960x540 fast, factor 2, default) | malvar (1920x1080 HQ, no color fringing) | cfa-drizzle (3840x2160, 2x)
+  # Mandatory text: cfa-drizzle = only after quality-gate pass + doc hint that "auto" remains a pipeline decision, suggest only recommends. (star_count 1 vs 20, quality gate, dithering detection)
+
+pcc:
+  enabled: true  # true -> --pcc, false -> --no-pcc, null -> preset wins — consistent with V19-PCC-FLAG (CLI > File > Config > Preset)
+
+# Optional hints — part of the schema, extra="ignore", not required by process, but useful for traceability (minors equipment/filter/exptime).
+# null when the value could not be determined (e.g. no --header given).
+equipment_hint: dwarf_mini  # from TELESCOP header (az/eq) — e.g. dwarf_mini (az), via detect_mount_type
+filter_hint: Duo-Band  # from FITS FILTER header (Broadband/Duo-Band/Narrowband) — preset hint, narrowband threshold M-2
+exptime_hint: 60  # from EXPTIME header (seconds) — registration hint (AZ+long -> astroalign), e.g. 60
+# simbad_warning: null  # null | "simbad_unavailable — offline, cache-only" — on cache miss without network

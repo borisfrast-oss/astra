@@ -81,6 +81,36 @@ def _expand_config_values(obj):
     return obj
 
 
+def _deep_merge_dicts(base: dict, override: dict) -> dict:
+    """Recursive dict-merge, ``override`` wins on key conflicts.
+
+    Used by the auto-discovery layers (CWD / user-config / pipeline-root,
+    see ``load_config``) to implement the "Layered: defaults < user config
+    < project config < CLI overrides" contract documented at the top of
+    ``DEFAULT_CONFIG`` — a discovered ``config.yaml`` that only sets a
+    handful of fields (e.g. Boris' ``~/.config/astra/config.yaml``, which
+    only sets ``data_root``/``suggest.target_cache_path``/etc.) must still
+    inherit ``pipeline_presets``/``equipment_profiles``/... from
+    ``DEFAULT_CONFIG`` instead of silently losing them (``AppConfig``'s
+    own Pydantic defaults for those fields are empty lists, NOT
+    ``DEFAULT_CONFIG``'s values \u2014 without this merge a minimal discovered
+    config.yaml would make every preset lookup fail, V19-Config-Discovery
+    Stella-Smoke 2026-09-04 fallout).
+
+    Lists/scalars are replaced wholesale by ``override`` (no element-wise
+    merge, e.g. a custom ``pipeline_presets`` list fully replaces the
+    default one, matching normal user expectations); only dict values are
+    merged recursively.
+    """
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def _load_dotenv_files() -> None:
     """Lade .env Dateien mit Precedence CWD > pipeline_root, Shell > .env.
 
@@ -207,6 +237,8 @@ registration:
   max_rotation_deg: 2.0
   max_scale_dev: 0.02
   stack_scale_factor: 2.0
+  zero_shift_threshold: 0.05
+  zero_shift_fallback: true
 
 # GR-B (AC-GR-B1): Gradient-Removal-Config (auch ueber CLI-Flags
 # --gradient-removal-* ueberschreibbar; Precedence CLI > Config > Preset >
@@ -415,6 +447,11 @@ pipeline_presets:
       weight: "noise"
       stretch_method: "asinh"
       stretch_factor: 0.12
+      preview_export:
+        scnr: true
+        background_neutralization: true
+        saturation: 1.2
+        stretch: "asinh"
 
   - name: "star_standard"
     target_types: ["star", "star_cluster", "globular_cluster", "open_cluster"]
@@ -449,6 +486,11 @@ pipeline_presets:
       rejection: "winsorized"
       normalization: "mul"
       weight: "noise"
+      preview_export:
+        scnr: true
+        background_neutralization: true
+        saturation: 1.2
+        stretch: "asinh"
 
   # V1.6-2 (OQ-BIL-1, AC-BIL-B3) + V1.8-0 (MALVAR): Bilinear-Presets fuer volle Aufloesung.
    # nebula_bilinear/galaxy_bilinear: Bilinear ist deprecated (Grace v1.8),
@@ -519,16 +561,24 @@ def _warn_deprecated_profiles(cfg: AppConfig) -> None:
 def load_config(config_path: Path | None = None) -> AppConfig:
     """Load configuration with layering.
 
-    Quelle (Precedence, Leo-Auftrag 2026-08-11 B1):
+    Quelle (Precedence, Leo-Auftrag 2026-08-11 B1; erweitert Stella-Smoke
+    2026-09-04: ``suggest`` fand ``~/.config/astra/config.yaml`` nicht,
+    weil diese Quelle bis dahin gar nicht Teil der Discovery war):
     1. Expliziter Pfad (CLI --config / -c): unveraendert. Existiert die
        Datei nicht, bleibt das bisherige Verhalten (DEFAULT-Fallback) —
        der CLI verhindert das bereits via ``click.Path(exists=True)``.
     2. Ohne expliziten Pfad: ``config.yaml`` im aktuellen Arbeitsverzeichnis
        (CWD) — ein frischer User, der nur ``process <target>`` ausfuehrt,
        bekommt seine Umgebungs-Config statt des Default-Strings.
-    3. Kein CWD-Config: ``{pipeline_root}/config.yaml`` (Projekt-Root, das
+    3. Kein CWD-Config: ``~/.config/astra/config.yaml`` (User-Config,
+       ``_user_config_dir()`` — plattformunabhaengig ``Path.home()``).
+       Ueberlebt einen ``git pull``/Neuinstallation im Projekt-Root und ist
+       der Ort, an dem Boris z.B. ``suggest.target_cache_path`` auf die
+       orion-KB zeigen laesst, ohne eine repo-lokale ``config.yaml`` zu
+       pflegen.
+    4. Kein User-Config: ``{pipeline_root}/config.yaml`` (Projekt-Root, das
        Verzeichnis, das ``src/astro_process`` enthaelt).
-    4. Sonst: DEFAULT_CONFIG-String (degenerierte Fälle, z.B. Install per
+    5. Sonst: DEFAULT_CONFIG-String (degenerierte Fälle, z.B. Install per
        Wheel ohne Projekt-Root).
 
     Jede Quelle wird mit ``config.loaded_from`` (source, path) geloggt.
@@ -561,14 +611,20 @@ def load_config(config_path: Path | None = None) -> AppConfig:
 
     for source, candidate in (
         ("cwd", Path.cwd() / "config.yaml"),
+        ("user_config", _user_config_dir() / "config.yaml"),
         ("pipeline_root", _pipeline_root() / "config.yaml"),
     ):
         if candidate.is_file():
             with open(candidate, encoding="utf-8") as f:
                 user_config = yaml.safe_load(f) or {}
             user_config = _expand_config_values(user_config)
+            # Layered ueber DEFAULT_CONFIG (siehe _deep_merge_dicts) — ein
+            # partieller Fund (z.B. nur data_root + suggest.*) verliert nicht
+            # pipeline_presets/equipment_profiles/etc.
+            default_data = yaml.safe_load(DEFAULT_CONFIG)
+            merged_config = _deep_merge_dicts(default_data, user_config)
             logger.info("config.loaded_from", source=source, path=str(candidate))
-            cfg = AppConfig(**user_config)
+            cfg = AppConfig(**merged_config)
             _warn_deprecated_profiles(cfg)
             return cfg
 
@@ -578,6 +634,19 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     cfg = AppConfig(**default_data)
     _warn_deprecated_profiles(cfg)
     return cfg
+
+
+def _user_config_dir() -> Path:
+    """User-Config-Verzeichnis fuer ``load_config()`` Discovery-Layer 3.
+
+    ``~/.config/astra`` (``Path.home()`` — funktioniert unter Windows
+    genauso wie unter Linux/Mac, kein XDG-Sonderfall noetig, da astra kein
+    weiteres XDG-konformes Verzeichnis nutzt). Eigene Funktion (statt
+    inline in ``load_config``), damit Tests sie wie ``_pipeline_root``
+    monkeypatchen koennen (Isolation von der echten ``~/.config/astra``
+    eines Dev-Rechners, siehe test_cli_env_parametrization.py).
+    """
+    return Path.home() / ".config" / "astra"
 
 
 def _pipeline_root() -> Path:
@@ -621,7 +690,7 @@ def resolve_registration(
 
     Precedence: CLI > Config (AppConfig.registration) > Preset
     (pipeline.processing_params.registration) > Default (fft / null /
-    2.0 / 0.02 / 2.0 / 0.0 / true).
+    2.0 / 0.02 / 2.0 / 0.05 / true) — V19-FIX-12 P1 Mandatory Gate 0.05.
 
     Feldweise Aufloesung, `None` = "nicht gesetzt" auf jeder Ebene:
     - method: CLI-Flag, sonst Config-Block, sonst Preset, sonst "fft".
@@ -637,10 +706,9 @@ def resolve_registration(
       stella Punkt 5 — Teleskop (z.B. Dwarf3): nur 2x Superpixel-Debayer). KEIN
       CLI-Flag — nur Config/Preset.
     - zero_shift_threshold: CLI-Flag (--zero-shift-threshold), sonst
-      Config-Block, sonst Preset, sonst 0.0 (Default 0.0 = Guard praktisch
-      deaktiviert — Fallback/Reject greift nur bei corr_hp < 0.0, d.h.
-      praktisch nie; Werte > 0 bewusst setzen, um den W1-Guard (RE-F,
-      V1.3-24) zu aktivieren).
+      Config-Block, sonst Preset, sonst 0.05 (Default 0.05 = Guard aktiv
+      V19-FIX-12, entkoppelt von frame_selection.enabled, P1 Mandatory Gate;
+      Fallback/Reject greift bei corr_hp < 0.05; V1.8-8 DEF-006).
     - zero_shift_fallback: CLI-Flag (--no-zero-shift-fallback -> False),
       sonst Config-Block, sonst Preset, sonst True (RE-F, V1.3-24).
     """
@@ -685,7 +753,7 @@ def resolve_registration(
     if config_reg is not None:
         stack_scale_factor = config_reg.stack_scale_factor
 
-    zero_shift_threshold: float = 0.0
+    zero_shift_threshold: float = 0.05
     if preset_reg is not None:
         zero_shift_threshold = preset_reg.zero_shift_threshold
     if config_reg is not None:
@@ -1280,7 +1348,7 @@ def resolve_registration_config(
         "max_control_points": None,
         "max_rotation_deg": 2.0,
         "max_scale_dev": 0.02,
-        "zero_shift_threshold": 0.0,
+        "zero_shift_threshold": 0.05,
         "zero_shift_fallback": True,
         "max_exptime_fft_warn": 45,
         "stack_scale_factor": 2.0,
@@ -1324,7 +1392,7 @@ def resolve_registration_config(
     except Exception:
         pass
 
-    # 3. Auto-Detect (falls kein Equipment-Profil matched)
+    # 3. Auto-Detect (falls kein Equipment-Profil matched) — V19-FIX-10: 15° dwarf_mini, 30° generic AZ
     if not equip_dict and header is not None and detect_preferred_registration is not None:
         try:
             auto_method = detect_preferred_registration(
@@ -1332,7 +1400,24 @@ def resolve_registration_config(
             )
             result["method"] = auto_method
             if auto_method in ("astroalign", "rotation_fft"):
-                result["max_rotation_deg"] = 15.0
+                # Generic AZ (Seestar, AZ ohne Dwarf-Mini Profil) braucht 30° (M27 Ghosting), Dwarf-Mini bleibt 15° (Spec dwarf_mini 15°)
+                try:
+                    telescop_upper = str(header.get("TELESCOP", "")).upper() if header is not None else ""
+                except Exception:
+                    telescop_upper = ""
+                is_dwarf_mini = "DWARF" in telescop_upper and "MINI" in telescop_upper
+                # mount_type bereits bekannt (via EQMODE oder detect_mount_type); fallback via header wenn None
+                effective_mount = mount_type
+                if effective_mount is None:
+                    try:
+                        from ..core.equipment import detect_mount_type as _dt  # type: ignore
+                        effective_mount = _dt(header)
+                    except Exception:
+                        effective_mount = "az" if auto_method in ("astroalign", "rotation_fft") else "eq"
+                if effective_mount == "az" and not is_dwarf_mini:
+                    result["max_rotation_deg"] = 30.0
+                else:
+                    result["max_rotation_deg"] = 15.0
         except Exception:
             pass
     # 2. Equipment-Profil

@@ -2293,7 +2293,7 @@ class TestT10MergeAgent:
         assert loaded["method"] == "weighted_average"
 
     def test_merge_agent_less_than_2_stacks(self, tmp_dir: Path, sample_stacks: dict[str, Path], sample_metadata: dict[str, dict]):
-        """returns MergeResult with merged_path=None when < 2 stacks."""
+        """V1.9.1 FIX-11: single stack now creates merged with warning (not error)."""
         agent = MergeAgent(working_dir=tmp_dir, config=None)
         single_stack = {"15s60": sample_stacks["15s60"]}
         single_meta = {"15s60": sample_metadata["15s60"]}
@@ -2302,8 +2302,10 @@ class TestT10MergeAgent:
             group_metadata=single_meta,
             target_name="TestTarget",
         )
-        assert result.merged_path is None
-        assert "error" in result.merge_report
+        assert result.merged_path is not None
+        assert result.merged_path.exists()
+        assert "error" not in result.merge_report
+        assert result.merge_report["reference_group"] == "15s60"
 
     def test_merge_agent_resolve_config_from_self(self, tmp_dir: Path):
         """_resolve_merge_config returns config when available."""
@@ -3473,7 +3475,7 @@ class TestCR001W1HighpassGridRegistration:
     """CR-001 W1+W2: Shift-Berechnung auf Hochpass (sigma=30) via
     korrelationsbasierter Grob-zu-Fein-Suche (_corr_grid_shift); corr_hp als
     QC-Hauptmetrik (status aus corr_hp); Zero-Shift-Fallback bei corr_hp <
-    Schwelle (Default 0.0; Guard-Tests setzen explizit 0.3).
+    Schwelle (Default 0.05 seit V19-FIX-12; Guard-Tests setzen explizit 0.3).
     Belege: Killercase-Synthetik (hermetic) + M13-Real-Stacks (Lauf 074119)."""
 
     @pytest.fixture
@@ -3525,7 +3527,7 @@ class TestCR001W1HighpassGridRegistration:
                                     add_stars=True, rng_seed=1)
         tgt_path = create_test_fits(tmp_dir / "zf_tgt.fits", shape=(120, 160, 3),
                                     add_stars=True, rng_seed=99)
-        # explizit hohe Schwelle (Default seit V1.3-1: 0.0) — Guard-Verhalten
+        # explizit hohe Schwelle (Default seit V19-FIX-12: 0.05) — Guard-Verhalten
         params = {"registration": {"zero_shift_threshold": 0.3}}
         result = agent._register_to_reference_stack(
             tgt_path, ref_path, filter_name="", output_dir=tmp_dir / "zf_out",
@@ -3672,10 +3674,10 @@ class TestCR001W3MinCorrelation:
                        params=None):
             # stack_dir = tmp_dir/group_{hash}/04_stacked → Gruppe unterscheiden
             if "120s100_Duo-Band" in str(stack_dir):
-                # unter der Schwelle 0.1 → W3-Skip
+                # unter der Duo-Schwelle 0.05 (effektiv 0.05 statt 0.1) → W3-Skip
                 return RegistrationResult(
                     path=stack_fits["120s100_Duo-Band"], shift_y=0.0, shift_x=0.0,
-                    correlation=0.05, corr_hp=0.05, status="warning",
+                    correlation=0.02, corr_hp=0.02, status="warning",
                 )
             return RegistrationResult(
                 path=stack_fits["60s40"], shift_y=0.0, shift_x=0.0,
@@ -3703,15 +3705,15 @@ class TestCR001W3MinCorrelation:
         assert report_path.exists(), f"merge_report.json fehlt: {report_path}"
         report = json.loads(report_path.read_text())
 
-        # skipped_groups: 120s100_Duo-Band ausgeschlossen (corr_hp 0.05 < 0.1)
+        # skipped_groups: 120s100_Duo-Band ausgeschlossen (corr_hp 0.02 < 0.05 Duo-Schwelle)
         # W7-Erw. (AC-W7-2): preview_path hinzugefügt (relativ zum generated/{ts}-Ordner)
         skipped = report["skipped_groups"]
         assert len(skipped) == 1
         entry = skipped[0]
         assert entry["group"] == "120s100_Duo-Band"
         assert entry["reason"] == "below_min_correlation"
-        assert entry["corr_hp"] == 0.05
-        assert entry["min_correlation"] == 0.1
+        assert entry["corr_hp"] == 0.02
+        assert entry["min_correlation"] == 0.05
         assert "preview_path" in entry
         assert entry["preview_path"].endswith("preview_120s100_Duo-Band.jpg")
 
@@ -3724,7 +3726,7 @@ class TestCR001W3MinCorrelation:
 
         # Registrations-Metrik der geskippten Gruppe bleibt dokumentiert (QC)
         regs = report["cross_group_registrations"]
-        assert any(r["group"] == "120s100_Duo-Band" and r["corr_hp"] == 0.05 for r in regs)
+        assert any(r["group"] == "120s100_Duo-Band" and r["corr_hp"] == 0.02 for r in regs)
 
         # Stack bleibt unter group_120s100_Duo-Band/04_stacked/ erhalten (kein Cleanup)
         assert (tmp_dir / "group_120s100_Duo-Band" / "04_stacked").exists()

@@ -26,6 +26,7 @@ from click.testing import CliRunner
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from astro_process.cli import cli, _apply_resolver_result  # noqa: E402
+from astro_process.config import loader as config_loader  # noqa: E402
 from astro_process.config.loader import (  # noqa: E402
     DEFAULT_CONFIG,
     load_config,
@@ -298,18 +299,18 @@ class TestResolveRegistration:
         result = resolve_registration(cfg, preset)
         assert result.stack_scale_factor == 5.0
 
-    # ── P2-2 (ray-Review): zero_shift_threshold / zero_shift_fallback ──
+    # ── P2-2 (ray-Review) + V19-FIX-12 P1 Mandatory Gate ──
     # Precedence analog zu den uebrigen Feldern: CLI > Config > Preset >
-    # Default (0.0 / True). Default ohne Flags = v1.2 (RE-F-Felder greifen
-    # nur bei expliziter Konfiguration).
+    # Default (0.05 / True). Default ohne Flags = V19-FIX-12 0.05 (V1.8-8
+    # DEF-006, entkoppelt von frame_selection.enabled, P1 Mandatory Gate).
 
     def test_p2_default_zero_shift_threshold_and_fallback(self):
-        """P2-2: Default ohne Flags — zero_shift_threshold=0.0 (V1.3-1:
-        Regress der RE-F-Schwelle 0.3 — Guard nur als letztes Netz bei
-        corr ~ 0, Werte > 0 bewusst setzen), zero_shift_fallback=True
-        (v1.2-Default-Verhalten unveraendert)."""
+        """P2-2 + V19-FIX-12: Default ohne Flags — zero_shift_threshold=0.05
+        (V19-FIX-12, entkoppelt von frame_selection.enabled, P1 Mandatory Gate
+        0.05; V1.3-1 Regress der RE-F-Schwelle 0.3), zero_shift_fallback=True
+        (v1.2-Default-Verhalten unveraendert, aber Guard nun aktiv)."""
         result = resolve_registration(AppConfig(), _preset())
-        assert result.zero_shift_threshold == 0.0
+        assert result.zero_shift_threshold == 0.05
         assert result.zero_shift_fallback is True
 
     def test_p2_preset_overrides_default_zero_shift(self):
@@ -353,7 +354,7 @@ class TestResolveRegistration:
         cfg = AppConfig(registration=RegistrationConfig(zero_shift_fallback=True))
         result = resolve_registration(cfg, preset, cli_zero_shift_fallback=False)
         assert result.zero_shift_fallback is False
-        assert result.zero_shift_threshold == 0.0  # unveraendert (kein Flag)
+        assert result.zero_shift_threshold == 0.05  # unveraendert (kein Flag, V19-FIX-12 0.05)
 
     def test_p2_cli_zero_shift_flags_none_leave_layers(self):
         """P2-2: Ohne CLI-Flags (None) bleiben die Werte bei
@@ -529,10 +530,19 @@ class TestCliRegistrationFlag:
         assert '"max_rotation_deg": 20.0' in result.output
         assert "cli.process.registration" in result.output
 
-    def test_cli_default_thresholds_without_flag(self, tmp_path):
+    def test_cli_default_thresholds_without_flag(self, tmp_path, monkeypatch):
         """Default-Test (Auftrag): OHNE --max-rotation bleiben die Schwellen
-        bei 2.0 / 0.02 (keine Verhaltensaenderung fuer bestehende Laeufe)."""
+        bei 2.0 / 0.02 (keine Verhaltensaenderung fuer bestehende Laeufe).
+
+        Isoliert von CWD/pipeline_root/user_config-Discovery (V19-Config-
+        Discovery-Fix, Stella-Smoke 2026-09-04): ohne diese Isolation kann
+        eine reale ``~/.config/astra/config.yaml`` (registration.max_rotation_deg)
+        auf einem Dev-Rechner in dieses Default-Verhalten hineinregieren.
+        """
         target = self._create_light_target(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(config_loader, "_user_config_dir", lambda: tmp_path / "nouser")
+        monkeypatch.setattr(config_loader, "_pipeline_root", lambda: tmp_path / "noroot")
         runner = CliRunner()
         result = runner.invoke(
             cli, ["process", str(target), "--dry-run", "--registration-method",

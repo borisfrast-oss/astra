@@ -224,6 +224,25 @@ Input staging — copy conventional input folders into generated/<ts>/00_input.
 | --- | --- | --- |
 | `stage_input` | function | — |
 
+### suggest
+
+V19-1.10-TARGET-ADVISOR — core logic for ``astra suggest``.
+
+| Symbol | Kind | Description |
+| --- | --- | --- |
+| `SuggestInputError` | class | — |
+| `parse_target_cache` | function | — |
+| `find_cache_entry` | function | — |
+| `load_target_cache` | function | — |
+| `classify_and_cite` | function | — |
+| `query_simbad` | function | — |
+| `read_fits_header` | function | — |
+| `build_registration_options` | function | — |
+| `SuggestResult` | class | — |
+| `build_result` | function | — |
+| `render_human` | function | — |
+| `to_json_dict` | function | — |
+
 ## Key agents
 
 ### calibration

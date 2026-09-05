@@ -84,6 +84,7 @@ from .config.loader import (
     resolve_stack_scale_factor,
 )
 from .config.models import MergeConfig, MultiGroupConfig, PipelinePreset
+from .core import suggest as suggest_core
 from .core.fits_parser import build_observation_context
 from .core.stacking import resolve_stack_method
 from .core.staging import stage_input
@@ -565,6 +566,21 @@ def cli(ctx, config, verbose):
         "debayerte 3D-RGB-Lights fuehren beim Debayer-Schritt zu einem Fehler."
     ),
 )
+# V19-1.10-TARGET-ADVISOR SUG-5: einziges neues Flag, kein Auto-Discover.
+# Precedence CLI > suggested File > Config > Preset > Default (analog
+# V19-PCC-FLAG). `--params-file` Alias VERWORFEN (OQ-SUG-5, nicht
+# implementieren). Ohne dieses Flag ist `process` byte-identisch (AC-SUG-5b).
+@click.option(
+    "--from-suggested",
+    "from_suggested",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Load preset/registration/debayer/pcc from a suggested_parameters "
+        "file (see 'astra suggest --output'). Precedence: CLI flags > file "
+        "> config > preset > default; no auto-discover without this flag."
+    ),
+)
 @click.pass_context
 def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups, resume,
             multi_group, auto_group, merge, weight_by, merge_method, darks_path, no_calib,
@@ -577,7 +593,7 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
             merge_filter, cfa_drizzle, drizzle_scale, drizzle_pixfrac, drizzle_kernel,
             cfa_drizzle_quality_gate, cfa_drizzle_min_frames, cfa_drizzle_fallback,
             cfa_drizzle_star_count_min, cfa_drizzle_snr_min, cfa_drizzle_correlation_min,
-            cfa_drizzle_fwhm_range, pcc):
+            cfa_drizzle_fwhm_range, pcc, from_suggested):
     """Process a single target directory.
 
     Hinweis (Docs regen 2026-08-11, B3): --config/-c ist eine GLOBALE
@@ -589,6 +605,38 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
     cfg: AppConfig = ctx.obj["config"]
     # T2: Precedence CLI > Config. None = Flag nicht gesetzt → Config-Wert.
     effective_no_calib = no_calib if no_calib is not None else cfg.no_calib
+
+    # V19-1.10-TARGET-ADVISOR SUG-5: --from-suggested (CLI > File > Config >
+    # Preset > Default). `from_suggested is None` -> byte-identisch (kein
+    # Auto-Discover, AC-SUG-5b) — dieser Block tut in diesem Fall NICHTS.
+    # CLI-Werte gewinnen IMMER: nur wenn preset/registration_method/
+    # max_rotation/debayer_method/pcc noch None sind, injiziert die Datei
+    # ihren Wert (in-memory, kein Write-back, analog V19-PCC-FLAG deepcopy).
+    if from_suggested is not None:
+        suggested_data = suggest_core.load_suggested_file(from_suggested)
+        suggested_registration = suggested_data.get("registration") or {}
+        suggested_debayer = suggested_data.get("debayer") or {}
+        suggested_pcc = suggested_data.get("pcc") or {}
+        if preset is None and suggested_data.get("preset"):
+            preset = suggested_data.get("preset")
+        if registration_method is None and suggested_registration.get("method"):
+            registration_method = suggested_registration.get("method")
+        if max_rotation is None and suggested_registration.get("max_rotation_deg") is not None:
+            try:
+                max_rotation = float(suggested_registration["max_rotation_deg"])
+            except (TypeError, ValueError):
+                pass
+        if debayer_method is None and suggested_debayer.get("method"):
+            debayer_method = suggested_debayer.get("method")
+        if pcc is None and suggested_pcc.get("enabled") is not None:
+            pcc = bool(suggested_pcc.get("enabled"))
+        logger.info(
+            "process.from_suggested",
+            path=str(from_suggested),
+            preset=suggested_data.get("preset"),
+            method=suggested_registration.get("method"),
+            source=suggested_data.get("source"),
+        )
 
     logger.info("cli.process.start", target=str(target_path), preset=preset)
 
@@ -1393,6 +1441,124 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
     except Exception as e:
         logger.error("cli.process.failed", error=str(e), exc_info=True)
         raise click.ClickException(f"Processing failed: {e}")
+
+
+# V19-1.10-TARGET-ADVISOR (SUG-1): `astra suggest` — offline-first advisor,
+# 1-2 numbered options (preset/registration/debayer/pcc), Handbook-cited,
+# never a decider (project.md Out-of-Scope: no target classification, the
+# user still chooses --preset). Core logic lives in core/suggest.py; this
+# command only wires CLI args <-> that module (cli.py stays command-shape
+# only, see plan.md Struktur-Empfehlung).
+@cli.command()
+@click.argument("target", required=False)
+@click.option(
+    "--header",
+    "header_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Read OBJECT/FILTER/EXPTIME/TELESCOP/DET-TEMP from a local FITS "
+        "header (local only, no cloud). OBJECT wins over TARGET when both "
+        "are given (suggest.header_overrides_target warning)."
+    ),
+)
+@click.option(
+    "--coords",
+    nargs=2,
+    type=str,
+    default=None,
+    help=(
+        "Fallback RA/DEC (decimal degrees) when TARGET/--header do not "
+        "resolve a cache hit. Used only for SIMBAD lookup / labeling; "
+        "suggest never plate-solves."
+    ),
+)
+@click.option(
+    "--output",
+    "output_path",
+    is_flag=False,
+    flag_value="__DEFAULT__",
+    default=None,
+    type=click.Path(path_type=Path),
+    help=(
+        "Write suggested_parameters as YAML (default) or JSON (.json "
+        "suffix). Without a path, defaults to "
+        "C:/Astra/<Target>/suggested.yaml (Target-Root, next to Lights). "
+        "Always overwrites (no auto-history)."
+    ),
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Print the machine-readable JSON suggestion to stdout instead of the human-readable text.",
+)
+@click.pass_context
+def suggest(ctx, target, header_path, coords, output_path, as_json):
+    """Suggest a preset/registration/debayer/PCC combination for TARGET.
+
+    Offline-first advisor (Header > target-cache > SIMBAD > Handbook 22):
+    the local target-cache always wins; SIMBAD is only queried on a cache
+    miss and only if the network is reachable (5s timeout, 1 query). On
+    failure it degrades to a generic 2-option fallback with a warning —
+    never a crash, always Exit 0 (see suggest.simbad_unavailable).
+
+    This command is an ADVISOR, not a decider: it never runs `process` by
+    itself and `process` never reads its output unless you pass the
+    explicit `--from-suggested <file>` flag.
+
+    Examples:
+        astra suggest M31
+        astra suggest M27 --header C:/Astra/M27/light_0001.fits
+        astra suggest C19 --json --output C:/Astra/C19/suggested.yaml
+        astra suggest M31 --output
+    """
+    cfg: AppConfig = ctx.obj["config"]
+    suggest_cfg = getattr(cfg, "suggest", None)
+    cache_path = getattr(suggest_cfg, "target_cache_path", None) if suggest_cfg else None
+
+    coords_tuple = None
+    if coords:
+        try:
+            coords_tuple = (float(coords[0]), float(coords[1]))
+        except ValueError:
+            raise click.ClickException(
+                f"--coords expects two decimal-degree values, got: {coords!r}"
+            )
+
+    try:
+        result = suggest_core.build_result(
+            target=target,
+            header_path=header_path,
+            coords=coords_tuple,
+            cache_path=cache_path,
+        )
+    except suggest_core.SuggestInputError as e:
+        raise click.ClickException(str(e)) from e
+
+    data = suggest_core.to_json_dict(result)
+
+    if output_path is not None:
+        resolved_output = (
+            suggest_core.default_output_path(result.target, data_root=cfg.data_root)
+            if str(output_path) == "__DEFAULT__"
+            else Path(output_path)
+        )
+        suggest_core.write_suggested_file(suggest_core.to_file_dict(result), resolved_output)
+        logger.info(
+            "suggest.wrote_suggested",
+            path=str(resolved_output),
+            preset=data["preset"],
+            method=data["registration"]["method"],
+        )
+
+    if as_json:
+        # Single-line JSON (kein indent): structlog schreibt vorangehende
+        # Log-Events ebenfalls nach stdout (JSONRenderer) — die letzte Zeile
+        # ist so eindeutig als DAS Suggest-Ergebnis identifizierbar/parsebar.
+        click.echo(json.dumps(data))
+    else:
+        click.echo(suggest_core.render_human(result))
 
 
 @cli.command()
@@ -3114,14 +3280,18 @@ def doctor(ctx, target_path, fix):
                         click.echo(f"[FIX FAIL] {p}: {e}", err=True)
             # 2. Config-Defaults: falls kein equipment_profiles, Default anlegen? Write back default config if missing file
             cfg_path = ctx.obj.get("config_path")
-            # try cwd config
-            cwd_cfg = Path.cwd() / "config.yaml"
-            if not cwd_cfg.exists():
+            # CWD-Guard (V19-1.9.2-STRAYCFG): nutze cfg_path statt blind Path.cwd()/config.yaml
+            # cfg_path ist dead var Fix C — verhindert Stray-File 15.511 Bytes im Repo-Root bei direktem pytest aus CWD
+            if cfg_path is not None:
+                target_cfg = Path(cfg_path)
+            else:
+                target_cfg = Path.cwd() / "config.yaml"
+            if not target_cfg.exists():
                 try:
                     from .config.loader import save_default_config
-                    save_default_config(cwd_cfg)
-                    fixed.append(f"Config erstellt: {cwd_cfg}")
-                    click.echo(f"[FIX] Config erstellt: {cwd_cfg}")
+                    save_default_config(target_cfg)
+                    fixed.append(f"Config erstellt: {target_cfg}")
+                    click.echo(f"[FIX] Config erstellt: {target_cfg}")
                 except Exception:
                     pass
             # 3. Dark-Struktur: ensure subdirs exist per config

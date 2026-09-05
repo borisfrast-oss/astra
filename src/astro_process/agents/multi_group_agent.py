@@ -397,12 +397,10 @@ def register_to_reference_stack(
     use_rotation_fft = reg_method == "rotation_fft"
     rotation_fft_fallback = reg_method == "astroalign"
 
-    # RE-F (V1.3-24, AC-RE-F3): W1-Guard-Parameter aus der effektiven
-    # Registrations-Config (Default 0.0 = Guard praktisch deaktiviert:
-    # Fallback/Reject greift nur bei corr_hp < 0.0, d.h. praktisch nie;
-    # Werte > 0 bewusst setzen, um den W1-Guard (RE-F, V1.3-24) zu
-    # aktivieren).
-    zero_shift_threshold = float(reg_cfg.get("zero_shift_threshold", 0.0))
+    # RE-F (V1.3-24, AC-RE-F3) + V19-FIX-12 P1 Mandatory Gate 0.05:
+    # Default 0.05 = Guard aktiv (entkoppelt von frame_selection.enabled),
+    # Fallback/Reject greift bei corr_hp < 0.05 (V1.8-8 DEF-006, V19-FIX-12).
+    zero_shift_threshold = float(reg_cfg.get("zero_shift_threshold", 0.05))
     zero_shift_fallback_enabled = bool(reg_cfg.get("zero_shift_fallback", True))
 
     # CR-001 P3-M1 (ray follow-up): Shape-Mismatch-Guard. Abweichende

@@ -42,10 +42,9 @@ class RegistrationConfig(BaseModel):
         CLI-Flag). Greift im Export-Header als Fallback, wenn keine
         PCC-Skala verfuegbar ist (nebula-Presets, z.B. M27).
     zero_shift_threshold: RE-F (V1.3-24, AC-RE-F3): corr_hp-Schwelle fuer
-        den W1-Zero-Shift-Fallback (fft-Zweig). Default 0.0 = Guard praktisch
-        deaktiviert (Fallback/Reject greift nur bei corr_hp < 0.0, d.h.
-        praktisch nie); Werte > 0 bewusst setzen, um den W1-Guard (RE-F,
-        V1.3-24) zu aktivieren.
+        den W1-Zero-Shift-Fallback (fft-Zweig). Default 0.05 = Guard aktiv
+        (V19-FIX-12, entkoppelt von frame_selection.enabled, P1 FIX-12);
+        Werte > 0 aktivieren den W1-Guard (RE-F, V1.3-24) bereits per Default.
         Bei astroalign-Gewinner ist dieselbe Schwelle die Reject-Schwelle:
         corr_hp_aa < Schwelle -> Frame verwerfen statt zeroshift-stapeln
         (AC-RE-F1). CLI-Flag --zero-shift-threshold.
@@ -63,7 +62,7 @@ class RegistrationConfig(BaseModel):
     max_rotation_deg: float = 2.0
     max_scale_dev: float = 0.02
     stack_scale_factor: float = 2.0
-    zero_shift_threshold: float = 0.0
+    zero_shift_threshold: float = 0.05
     zero_shift_fallback: bool = True
     max_exptime_fft_warn: float = 45.0
 
@@ -524,6 +523,23 @@ class PCCConfig(BaseModel):
     quality_gate: PCCQualityGateConfig = Field(default_factory=PCCQualityGateConfig)
 
 
+class SuggestConfig(BaseModel):
+    """V19-1.10-TARGET-ADVISOR (SUG-2): Optionale Config fuer ``astra suggest``.
+
+    target_cache_path: Pfad zu einer target-cache.md-artigen Markdown-Datei
+        (stella-Schema, tolerant per ``core.suggest.parse_target_cache``
+        geparst). Optional (Default None) — die orion-KB
+        (``knowledge-base/agents/stella/target-cache.md``) existiert bei
+        PyPI-Installationen des Packages NICHT; das Package MUSS ohne sie
+        funktionieren (Cache-Miss-Pfad: SIMBAD-Webfetch + generischer
+        Handbook-Fallback, AC-SUG-4). Boris setzt den Pfad lokal (config.yaml)
+        auf den stella-SSOT-Pfad; ohne Eintrag ist jedes Target ein
+        Cache-Miss (kein Fehler, siehe suggest.simbad_unavailable).
+    """
+
+    target_cache_path: Optional[Path] = None
+
+
 class RuntimeConfig(BaseModel):
     """Runtime configuration (CLI overrides)."""
     target_path: Optional[Path] = None
@@ -608,10 +624,11 @@ class AppConfig(BaseSettings):
     rejection_thresholds: Optional[dict[str, tuple[Optional[float], Optional[float]]]] = None
     rejection_elongation: Optional[bool] = None
     # V1.8-8 (DEF-006): Mandatory corr_hp Gate — optional top-level override.
-    # None = use ProcessingParams default (0.05). Explicit value (inkl. None
-    # zum Deaktivieren) overrides. Analog V1.4-20 min_correlation (0.1), aber
+    # Default 0.05 (statt None) — mandatory Gate immer aktiv (entkoppelt von
+    # frame_selection.enabled, P1 FIX-12). Explicit None (null in YAML)
+    # deaktiviert das Gate. Analog V1.4-20 min_correlation (0.1), aber
     # intra-group vor Stacking, mandatory für average (stella a+c).
-    rejection_min_corr_hp: Optional[float] = None
+    rejection_min_corr_hp: Optional[float] = Field(default=0.05)
 
     # V1.7-2 FSEL-B (AC-FSEL-B1): Frame-Selection — optional top-level override.
     # None = use ProcessingParams default (enabled False, OQ-FSEL-2 A).
@@ -637,6 +654,12 @@ class AppConfig(BaseSettings):
     # Default-Factory = rueckwaertskompatibel (kein Config-Eintrag noetig,
     # Gate aktiv mit 0.5–2.0). Siehe PCCQualityGateConfig-Docstring.
     pcc: PCCConfig = Field(default_factory=PCCConfig)
+
+    # V19-1.10-TARGET-ADVISOR (SUG-2): optionaler target-cache.md-Pfad fuer
+    # `astra suggest` (None = kein Config-Block -> jedes Target ist ein
+    # Cache-Miss, SIMBAD/Handbook-Fallback greift, AC-SUG-4). PyPI-Pakete
+    # ohne die orion-KB funktionieren dadurch unveraendert (kein Breaking).
+    suggest: Optional[SuggestConfig] = None
 
     # V1.6-1 (SSOT-C): Konfigurierbare Filename-Patterns.
     # Precedence: Config-Patterns > hardcoded Defaults (AC-SSOT-C4).

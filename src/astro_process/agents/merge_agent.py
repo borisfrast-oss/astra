@@ -143,7 +143,7 @@ class MergeAgent:
                 weight_by=merge_config.weight_by,
             )
 
-        if len(group_stacks) < 2:
+        if len(group_stacks) == 0:
             logger.warning("merge.insufficient_stacks", count=len(group_stacks))
             return MergeResult(
                 merged_path=None,
@@ -151,6 +151,11 @@ class MergeAgent:
                 group_metadata=group_metadata,
                 merge_report={"error": "insufficient_stacks"},
             )
+        if len(group_stacks) == 1:
+            # V19-FIX-11 P0 Gate Duo-Band: single_stack_fallback — mit Warnung statt hart Skip wenn nur 1 Stack übrig (wie Single-Group)
+            sole_hash = next(iter(group_stacks))
+            logger.warning("merge.single_stack_fallback", count=1, group=sole_hash, msg="Only one stack remains after quality gate — exporting single stack as merged with warning")
+            # Fallthrough to load/merge path with 1 stack (copy instead of weighted average)
 
         # ── 1. Load stacks from paths ───────────────────────
         stacks: list[np.ndarray] = []
@@ -180,7 +185,7 @@ class MergeAgent:
             weights.append(float(w))
             stack_hashes.append(group_hash)
 
-        if len(stacks) < 2:
+        if len(stacks) == 0:
             logger.warning("merge.insufficient_valid_stacks", count=len(stacks))
             return MergeResult(
                 merged_path=None,
@@ -188,6 +193,9 @@ class MergeAgent:
                 group_metadata=group_metadata,
                 merge_report={"error": "insufficient_valid_stacks"},
             )
+        if len(stacks) == 1:
+            logger.warning("merge.single_stack_fallback_valid", count=1, stacks=stack_hashes, msg="Only one valid stack after loading — exporting as merged")
+            # Continue to merge (single stack copy/wrap)
 
         # ── 2. Validate shapes ──────────────────────────────
         shapes = [s.shape for s in stacks]

@@ -2,10 +2,11 @@
 
 Abdeckung:
 - B1 (config.yaml automatisch finden): `load_config()` ohne expliziten Pfad
-  prueft nacheinander (1) config.yaml im CWD, (2) `{pipeline_root}/config.yaml`
-  (Projekt-Root), (3) erst dann DEFAULT_CONFIG-String. Expliziter Pfad
-  (CLI --config) bleibt unveraendert (Precedence). Log `config.loaded_from`
-  nennt die geladene Quelle.
+  prueft nacheinander (1) config.yaml im CWD, (2) `~/.config/astra/config.yaml`
+  (User-Config, `_user_config_dir()` — V19-Fix Stella-Smoke 2026-09-04),
+  (3) `{pipeline_root}/config.yaml` (Projekt-Root), (4) erst dann
+  DEFAULT_CONFIG-String. Expliziter Pfad (CLI --config) bleibt unveraendert
+  (Precedence). Log `config.loaded_from` nennt die geladene Quelle.
 - B2 (--darks-path optional): CLI weglassen -> `darks_repository` aus der
   Config verwenden; weder CLI noch Config gesetzt -> verstaendliche
   Fehlermeldung (ClickException) mit Hinweis auf config.yaml
@@ -14,9 +15,10 @@ Abdeckung:
   Subcommand); die Gruppen-Help nennt die Option ebenfalls.
 
 Teststrategie (wie bestehende CLI-Tests):
-- CWD-Isolation via `monkeypatch.chdir(tmp_path)`; `_pipeline_root` wird in
-  Loader-Tests gepatcht, damit die Discovery deterministisch ist (nicht auf
-  die echte config.yaml des Repos faellt).
+- CWD-Isolation via `monkeypatch.chdir(tmp_path)`; `_pipeline_root` UND
+  `_user_config_dir` werden in Loader-Tests gepatcht, damit die Discovery
+  deterministisch ist (nicht auf die echte config.yaml des Repos bzw. die
+  echte `~/.config/astra/config.yaml` eines Dev-Rechners faellt).
 - CLI-Laufpfade mit gemockten Agents (create_*_agent) — analog
   test_multi_group.py TestCR001P1CliFlag: die schwere Pipeline laeuft nicht,
   geprueft wird ausschliesslich die Darks-Verdrahtung (B2).
@@ -151,9 +153,10 @@ class TestB1ConfigDiscovery:
         _assert_loaded_from(mock_logger, "cwd")
 
     def test_pipeline_root_config_used_without_cwd_config(self, tmp_path, monkeypatch):
-        """Ohne CWD config.yaml findet load_config() {pipeline_root}/config.yaml."""
+        """Ohne CWD/User config.yaml findet load_config() {pipeline_root}/config.yaml."""
         cwd = tmp_path / "elsewhere"
         root = tmp_path / "root"
+        nouser = tmp_path / "nouser"
         cwd.mkdir()
         root.mkdir()
         (root / "config.yaml").write_text(
@@ -161,6 +164,9 @@ class TestB1ConfigDiscovery:
             encoding="utf-8",
         )
         monkeypatch.chdir(cwd)
+        # Isolation von der echten ~/.config/astra/config.yaml eines Dev-Rechners
+        # (Stella-Smoke 2026-09-04 nutzt genau diesen Pfad produktiv).
+        monkeypatch.setattr(config_loader, "_user_config_dir", lambda: nouser)
         monkeypatch.setattr(config_loader, "_pipeline_root", lambda: root)
         mock_logger = _spy_logger(monkeypatch)
 
@@ -170,12 +176,15 @@ class TestB1ConfigDiscovery:
         _assert_loaded_from(mock_logger, "pipeline_root")
 
     def test_default_fallback_without_any_config(self, tmp_path, monkeypatch):
-        """Weder CWD noch pipeline_root config.yaml -> DEFAULT_CONFIG-String."""
+        """Weder CWD noch User- noch pipeline_root config.yaml -> DEFAULT_CONFIG-String."""
         cwd = tmp_path / "elsewhere"
         noroot = tmp_path / "noroot"
+        nouser = tmp_path / "nouser"
         cwd.mkdir()
         noroot.mkdir()
         monkeypatch.chdir(cwd)
+        # Isolation von der echten ~/.config/astra/config.yaml eines Dev-Rechners.
+        monkeypatch.setattr(config_loader, "_user_config_dir", lambda: nouser)
         monkeypatch.setattr(config_loader, "_pipeline_root", lambda: noroot)
         mock_logger = _spy_logger(monkeypatch)
 
@@ -185,6 +194,59 @@ class TestB1ConfigDiscovery:
         assert cfg.darks_repository is None
         assert cfg.default_preset == "star_standard"
         _assert_loaded_from(mock_logger, "default")
+
+    def test_user_config_used_between_cwd_and_pipeline_root(self, tmp_path, monkeypatch):
+        """V19-Config-Discovery-Fix (Stella-Smoke 2026-09-04): ohne CWD-Config
+        aber mit ``~/.config/astra/config.yaml`` (hier via ``_user_config_dir``
+        gemockt) gewinnt die User-Config vor ``{pipeline_root}/config.yaml``."""
+        cwd = tmp_path / "elsewhere"
+        user_dir = tmp_path / "user" / ".config" / "astra"
+        root = tmp_path / "root"
+        cwd.mkdir()
+        user_dir.mkdir(parents=True)
+        root.mkdir()
+        (user_dir / "config.yaml").write_text(
+            yaml.safe_dump({"default_preset": "user_preset"}),
+            encoding="utf-8",
+        )
+        (root / "config.yaml").write_text(
+            yaml.safe_dump({"default_preset": "root_preset"}),
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr(config_loader, "_user_config_dir", lambda: user_dir)
+        monkeypatch.setattr(config_loader, "_pipeline_root", lambda: root)
+        mock_logger = _spy_logger(monkeypatch)
+
+        cfg = config_loader.load_config()
+
+        assert cfg.default_preset == "user_preset"
+        _assert_loaded_from(mock_logger, "user_config")
+
+    def test_cwd_config_preferred_over_user_config(self, tmp_path, monkeypatch):
+        """CWD config.yaml gewinnt weiterhin ueber ``~/.config/astra/config.yaml``."""
+        cwd = tmp_path / "cwd"
+        user_dir = tmp_path / "user" / ".config" / "astra"
+        cwd.mkdir()
+        user_dir.mkdir(parents=True)
+        (cwd / "config.yaml").write_text(
+            yaml.safe_dump({"default_preset": "cwd_preset"}),
+            encoding="utf-8",
+        )
+        (user_dir / "config.yaml").write_text(
+            yaml.safe_dump({"default_preset": "user_preset"}),
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr(config_loader, "_user_config_dir", lambda: user_dir)
+        monkeypatch.setattr(config_loader, "_pipeline_root",
+                             lambda: tmp_path / "noroot")
+        mock_logger = _spy_logger(monkeypatch)
+
+        cfg = config_loader.load_config()
+
+        assert cfg.default_preset == "cwd_preset"
+        _assert_loaded_from(mock_logger, "cwd")
 
     def test_explicit_path_wins_over_discovery(self, tmp_path, monkeypatch):
         """Expliziter Pfad (CLI --config) gewinnt ueber CWD/pipeline_root."""
