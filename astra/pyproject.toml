@@ -1,0 +1,142 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "astra-pipeline"
+version = "1.11.0"
+description = "Agentic Astrophotography Processing Pipeline"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Boris Frast", email = "borisfrast@gmail.com"}
+]
+keywords = ["astrophotography", "astronomy", "fits", "pipeline", "agentic"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+urls = {Homepage = "https://github.com/borisfrast-oss/astra", Repository = "https://github.com/borisfrast-oss/astra", Issues = "https://github.com/borisfrast-oss/astra/issues", Changelog = "https://github.com/borisfrast-oss/astra/blob/main/CHANGELOG.md"}
+
+dependencies = [
+    "astropy>=6.0",
+    "numpy>=2.0",
+    "scipy>=1.12",
+    "colour-demosaicing>=0.2.7",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "jinja2>=3.1",
+    "structlog>=24.0",
+    "pyyaml>=6.0",
+    # click 8.5 changes Flag-default rendering (Sentinel); pin keeps fresh
+    # installs deterministic and the CI docs-check consistent.
+    "click>=8.1,<8.5",
+    "rich>=13.0",
+    "prompt-toolkit>=3.0",
+    "python-dotenv>=1.0",
+    # DEF-008 (Boris-Entscheid 2026-09-02): astroquery ist Base-Dependency,
+    # damit PCC (GAIA/VizieR/APASS) out-of-the-box verfuegbar ist.
+    "astroquery>=0.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-mock>=3.12",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "yamllint>=1.35",
+    # Full test-suite environment (CI-equivalent). Mirrors the astroalign extra
+    # so that `pip install -e .[dev]` runs every test without optional-dependency
+    # skips. astroquery ist seit DEF-008 Base-Dependency und muss hier nicht
+    # mehr wiederholt werden.
+    "astroalign>=2.6,<3",
+    "scikit-image>=0.24",
+    "scikit-learn>=1.1",
+    "sep>=1.4",
+]
+graxpert = ["graxpert>=3.2"]
+astro = ["astrometry-net>=0.97"]
+# W9-A (AC-W9-A1, ADR-021): optional astroalign extra.
+# sep is a hard runtime dependency (unconditional `import sep` in _find_sources).
+# scikit-image is a lazy/optional dependency loaded by astroalign when used.
+# scikit-learn ist ebenfalls lazy: wird von scikit-image bei astroalign-Nutzung
+# benoetigt, aber nicht beim reinen `import astroalign` (DEF-007).
+astroalign = ["astroalign>=2.6,<3", "scikit-image>=0.24", "scikit-learn>=1.1", "sep>=1.4"]
+
+[project.scripts]
+astra = "astro_process.cli:cli"
+astro-process = "astro_process.cli:cli"
+
+# F-SE-1.2 (v12-structure-enhancement.md, SE-B): erstes Produktiv-Plugin
+# in v1.2 (OQ-PL-3-Amendment 2026-08-05). Entry-Point-Gruppe "astra.plugins"
+# ist verbindlich (OQ-PL-2, v12-plugin-interface.md).
+[project.entry-points."astra.plugins"]
+structure-enhancement = "astro_process.plugins.structure_enhancement:StructureEnhancementPlugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/astro_process"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "PIE", "T20", "PT", "PTH", "ERA", "SIM", "TID", "ARG", "LOG"]
+ignore = ["S101", "ARG001", "ARG002"]
+exclude = ["tests/fixtures/**", "test-data/**"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+strict = true
+namespace_packages = true
+exclude = ["tests/**", "test-data/**"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "e2e: End-to-end tests",
+    "slow: Slow tests",
+]
+
+# Astra project tooling metadata.
+# Pre-Release process: run `make docs && make check-docs` (or the equivalent
+# `python scripts/generate_docs.py all && python scripts/generate_docs.py check`)
+# before bumping the version or creating a release.
+[tool.astra]
+pre_release_steps = [
+    "python scripts/generate_docs.py all",
+    "python scripts/generate_docs.py check",
+]
+
+[tool.coverage.run]
+source = ["src/astro_process"]
+omit = ["tests/**", "test-data/**"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

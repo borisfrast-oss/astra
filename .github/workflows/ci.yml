@@ -46,4 +46,3 @@ jobs:
         run: |
           python scripts/generate_docs.py check
         shell: bash
-        continue-on-error: true
