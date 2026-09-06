@@ -165,45 +165,24 @@
 ## config.yaml (Defaults/Presets)
 
 ```yaml
-data_root: C:/Astra
+data_root: ${ASTRA_DATA_ROOT:-C:/Astra}
 working_dir: ./working
 output_dir: ./output
 config_dir: ./config
-gimp_path: gimp
+gimp_path: ${GIMP_PATH:-gimp}
 default_preset: star_standard
 cpu_threads: 0
 gpu_acceleration: true
 keep_working: false
 quality_accept_threshold: 80
 quality_review_threshold: 60
-plate_solve_enabled: false
-use_flats: false
-use_bias: false
-no_calib: false
-dark_scale_mismatch_abs: 5.0
-dark_scale_mismatch_frac: 0.04
-dark_scale_mismatch_low_frac: 0.5
+darks_repository: ${ASTRA_DARKS_ROOT:-C:/Astra/_darks}
 registration:
   method: fft
   max_control_points: null
   max_rotation_deg: 2.0
   max_scale_dev: 0.02
   stack_scale_factor: 2.0
-  zero_shift_threshold: 0.05
-  zero_shift_fallback: true
-gradient_removal:
-  enabled: false
-  degree: 2
-  grid:
-  - 16
-  - 16
-  sigma_clip: 3.0
-  min_samples: null
-cosmetic_correction:
-  enabled: false
-  n_frames: 3
-  threshold: 50.0
-  dark_tolerance: 20.0
 cfa_drizzle:
   enabled: false
   scale: 2.0
@@ -230,20 +209,6 @@ cfa_drizzle:
     min_stars_cfa: 3
   min_frames: 5
   fallback: malvar
-pcc:
-  enabled: null
-  quality_gate:
-    enabled: true
-    min_factor: 0.5
-    max_factor: 2.0
-multi_group:
-  reference_group: quality
-  pcc_fallback: auto
-  merge:
-    method: weighted_average
-    weight_by: frame_count
-    min_correlation: 0.1
-  keep_group_working_dirs: true
 equipment_profiles:
 - name: default
   telescope: Unknown
@@ -263,12 +228,6 @@ equipment_profiles:
   gain: 60
   offset: 10
   default_temp_c: 27.0
-  resolution:
-  - 1920
-  - 1080
-  debayer_factor: 2.0
-  bayer_pattern: RGGB
-  sensor: IMX462
   mount_type: az
   preferred_registration: astroalign
   max_rotation_deg: 15
@@ -279,7 +238,7 @@ equipment_profiles:
 
 ```
 
-Presets defined: 6
+Presets defined: 3
 
 ## Precedence & ENV
 
