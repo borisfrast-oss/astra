@@ -519,6 +519,8 @@ def file_hash(path: Path) -> str:
         return hashlib.sha256(_read_normalised(path)).hexdigest()[:16]
     hasher = hashlib.sha256()
     for file_path in sorted(path.rglob("*")):
+        if "__pycache__" in file_path.parts or file_path.suffix == ".pyc":
+            continue
         if file_path.is_file():
             hasher.update(_read_normalised(file_path))
     return hasher.hexdigest()[:16]
