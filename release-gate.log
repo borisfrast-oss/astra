@@ -1,6 +1,6 @@
-## ASTRA v1.11.0 Release Gate-Log
-## Generated: 2026-09-06 13:09 UTC
-## remy Phase 2/3 (Build + Smoke + Gate Prep)
+## ASTRA v1.11.0 Release Gate-Log — FINAL
+## Generated: 2026-09-06 13:09 UTC | Finalized: 2026-09-06 13:45 UTC
+## remy Phase 1–3 Complete (Build + Smoke + Gate Ready for Publish)
 
 ### Build Metadata
 Build-Timestamp: 2026-09-06 13:09 UTC
@@ -45,11 +45,12 @@ M1 Config & CI Ready: ✅ PASSED
   - CI (Monorepo v1.11 @20e209aa): 1136 passed + 2 skipped, 354s GRÜN
   - astra doctor: 24 OK (incl. .env, GAIA reachability, Config valid)
 
-M2 Governance Ready (Privacy): ✅ PASSED (PENDING: warden Audit)
+M2 Governance Ready (Privacy): ✅ PASSED (warden-Audit PASSED 06.09. EOD)
   - Build timestamp: 2026-09-06 13:09 UTC
-  - Manual hygiene grep (release-process.md Phase 2): NOT YET (pending remy Phase 4/5)
-  - Privacy scope: Release-repo sauber (kein C:\Users-Echtspur in .gitignore-konformen Files)
-  - Note: Full M2 gate (git grep -i "boris|C:\\Users" → Whitelist-Verify) läuft parallel in warden audit
+  - warden-Audit Report (06.09.): PASSED mit 1 Minor-Follow-up (plan.md mojibake → v1.12 backlog, nicht release-blockierend)
+  - REGISTRY Nachzüge: done (v1.11 testplan + 6 baseline yamls)
+  - Tracking-Cleanup: done (DEF-007..009 closed-stale, lessons S11–S13 kuratiert)
+  - Privacy scope: Release-repo sauber (kein C:\Users-Echtspur in shipped Files)
 
 M3 REG-SMART Gate: ✅ PASSED (via M7)
   - AZ 60s → astroalign Auto: Verified v1.11 Code
@@ -110,6 +111,15 @@ M6 v1.11.0 Final (Publish Gate): ⏳ PENDING (see M7 + warden below)
   - Code review (00617a0 fix(astra): DEF-013/014 + v19 suggest isolation): Confirmed no fallback-heuristik paths
   - generate_docs.py check Exit 0: Confirmed (v1.11.0 docs English, no german-prose)
 
+### M7 Quality-Gate — FINAL Verdict (Boris-Go 06.09.)
+
+**Boris Authorization (06.09., 13:30 UTC approx):** ✅ **RELEASE-GO**
+- Message: "go mit Empfehlungen" (M7.1 group-level 100% merged, M7.3 active-PCC-only, M7.4 conscious-fallback OK)
+- M7.1 Merge-Quote Messgröße: Gruppen-Ebene (100%), Cross-Group-Gating-Ausschlüsse akzeptiert
+- M7.3 PCC-Plausibilität: Nur aktivierte PCC-Läufe zählen (M31 apass 1/1, others skipped respected)
+- M7.4 Drizzle: Bewusster Fallback (0/4 aktiv) ist OK, nicht als Fehler gezählt
+- Release-Freigabe: ✅ Boris-Entscheid formalisiert, v1.11.0 publikationsreif
+
 ### M7 Real-Runs Tracking (stella + Boris)
 
 **Lauf-Matrix (06.09., v1.11-Code, Smoke --limit 5):**
@@ -135,33 +145,35 @@ M6 v1.11.0 Final (Publish Gate): ⏳ PENDING (see M7 + warden below)
   - Preview Auffälligkeiten (nebula_standard): C19 Rauschen (smoke-bedingt), LDN 935 Grünstich (SCNR), NGC 6960 rosa (v1.10) → grün (Re-Run)
   - Farbe: NGC 6960 rosa-Problem gelöst (PCC-skipped = unkalibrierte Farben OK)
 
-### M7 Gate Verdict: ✅ GO
+### M7 Gate Verdict: ✅ GO (Boris-Formalisiert)
 
-**Summary:**
-  - M7.1 Merge >70%: ✅ PASSED
-  - M7.2 Ghosting-frei >50%: ✅ PASSED (4/4 metrisch + visuell)
-  - M7.3 PCC plausibel >85%: ✅ PASSED (5/6 äquivalent)
-  - M7.4 Drizzle >33%: ⏳ SEMI (0/4 aktiv, aber bewusst Fallback ok)
-  - M7.5 Determinismus: ✅ PASSED (Code-Review ok; ray grep-Gate warden-pending)
-  - Abbruch-Kriterium: NICHT aktiviert (kein Merge ≤50%, kein Ghosting ≤17%, kein PCC <67% + rosa, kein neuer Fehler)
+**Summary (M7 Policy Compliance):**
+  - M7.1 Merge >70%: ✅ PASSED (100% group-level, cross-group gating accepted)
+  - M7.2 Ghosting-frei >50%: ✅ PASSED (4/4 metrisch + visuell Boris-bestätigt)
+  - M7.3 PCC plausibel >85%: ✅ PASSED (5/6 targets, active-PCC-only counting)
+  - M7.4 Drizzle >33%: ✅ ACCEPTED (0/4 aktiv, conscious fallback = OK per policy)
+  - M7.5 Determinismus: ✅ PASSED (warden-audit confirmed, ray grep-gate 0 fallback-heuristik)
+  - Abbruch-Kriterium: NICHT aktiviert (kein Blockers met)
 
-**M7-Go Status:** ✅ READY FOR PHASE 4
+**M7-Go Status:** ✅ **RELEASE-GO** (Boris 06.09. formalisiert)
 
-**Pending Conditions before Publish (Phase 4):**
-  - warden Audit: M2 Privacy + ray Grep-Gate (in progress parallel)
-  - Boris M7-Go Formalisierung: ✅ CONFIRMED (per sichtung befund + policy compliance)
-  - Tag Candidate: v1.11.0 (NOT CREATED YET — awaiting Phase 4 authorization)
+**Pre-Publish Conditions (erfüllt):**
+  - ✅ warden Audit: PASSED (M2 Privacy ✅, Tracking ✅, 1 Minor-Follow-up v1.12-Backlog)
+  - ✅ Boris M7-Go: FORMALISIERT (sichtung befund + policy-v1.10-1.11.md update)
+  - ✅ Tag Candidate: v1.11.0 ready (see Phase 4 below)
 
-### Phase 3 Gate Checklist
+### Phase 1–3 Gate Checklist (✅ ALL COMPLETE)
 
-- [x] Version Bump: 1.10.0 → 1.11.0 ✅
-- [x] Re-Sync: release-repo @6136013 ✅
+- [x] Version Bump: 1.10.0 → 1.11.0 (Monorepo @20e209aa) ✅
+- [x] Re-Sync: release-repo @0a2f453 (Root-Layout clean) ✅
 - [x] Build: hatch build --clean → 1.11.0 wheel + sdist ✅
-- [x] Smoke: astra --version/--help/doctor → GRÜN ✅
+- [x] Smoke (S13): astra --version/--help/doctor → GRÜN ✅
 - [x] Build-Archiv: C:\Users\boris\builds\astra\builds\v1.11.0_20260906-1309\ ✅
-- [x] Gate-Log: THIS FILE ✅
-- [ ] Tag v1.11.0: NOT YET (Phase 4, pending M7-Go + warden)
-- [ ] git push --tags: NOT YET (Phase 4/5, Publish-Sperre bis M7-Go + Boris authorization)
+- [x] M1–M6 Gates: ALL PASSED ✅
+- [x] M7 Quality-Gate: PASSED (Boris-formalisiert) ✅
+- [x] warden-Audit: PASSED (M2, Tracking) ✅
+- [x] Gate-Log: THIS FILE (finalized 13:45 UTC) ✅
+- [ ] Phase 4: Tag v1.11.0 + Push (remy handed off → Boris manual)
 
 ### Known Issues & Tracking
 
@@ -173,16 +185,31 @@ M6 v1.11.0 Final (Publish Gate): ⏳ PENDING (see M7 + warden below)
 
 **M7.4 Drizzle (0/4 aktiviert):** Deferred feature v1.12. Current fallback-run all successful (no broken Drizzle).
 
-### remy Sign-Off (Phase 3 Complete)
+### remy Sign-Off (Phase 1–3 COMPLETE)
 
-Release v1.11.0 is ready for Phase 4 (Tag + Publish) pending:
-1. **warden Audit:** M2 Privacy + M6 Tracking cleanup (in progress)
-2. **Boris M7-Go Formalization:** CONFIRMED per quality-concept/policy compliance
-3. **ray Grep-Gate:** Verify no hardcodes/fallback-heuristik (warden-pending)
+**Release v1.11.0 is READY FOR PHASE 4 (Tag + Push + Publish)**
 
-Gate-Log Status: **READY FOR PUBLISH (Phase 4 authorization awaiting)**
+All Pre-Conditions MET:
+1. ✅ **warden Audit:** PASSED (M2 Privacy ✅, Tracking ✅, 1 Minor-Follow-up v1.12)
+2. ✅ **Boris M7-Go:** FORMALISIERT (go mit empfehlungen, policy-v1.10-1.11.md 06.09.)
+3. ✅ **ray Grep-Gate:** Verified 0 fallback-heuristik (warden-confirmed)
+4. ✅ **S13 Lesson:** Build + Smoke completed BEFORE tagging
 
-Timestamp: 2026-09-06 13:09 UTC
-Agent: remy
-Phase: 2/3 (Build + Smoke + Gate Prep)
-Next: Phase 4 (Tag + Push) — authorization required
+**Gate-Log Status:** ✅ **RELEASE-GO (Phase 4: Boris Manual Publish-Execution)**
+
+---
+
+## PHASE 4 HANDOVER TO BORIS
+
+**Tag Candidate:** v1.11.0 (NOT YET CREATED — awaiting Boris trigger)
+**Release-Repo Status:** 0a2f453 (main, clean Root-Layout, ready for tag)
+**Build Artefakte:** verified in builds/v1.11.0_20260906-1309/
+
+**Next Agent:** Boris (Manual Phase 4/5 execution per release-process.md v2.1)
+**Boris-Checklist:** See BORIS-MANUAL-PUBLISH-CHECKLIST-v1.11.0.md (separate file)
+
+---
+
+**Gate-Log Finalized:** 2026-09-06 13:45 UTC
+**Agent:** remy (Release Manager)
+**Status:** Phase 1–3 ✅ COMPLETE → Phase 4 ⏳ AWAITING BORIS TRIGGER
