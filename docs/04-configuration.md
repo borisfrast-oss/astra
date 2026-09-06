@@ -10,7 +10,7 @@
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `data_root` | <class 'pathlib.Path'> | C:\Astra | Root directory for all target data (e.g. C:/Astra). |
+| `data_root` | <class 'pathlib.Path'> | C:/Astra | Root directory for all target data (e.g. C:/Astra). |
 | `working_dir` | <class 'pathlib.Path'> | working | Relative working directory for intermediate pipeline files. |
 | `output_dir` | <class 'pathlib.Path'> | output | Relative output directory for final pipeline products. |
 | `config_dir` | <class 'pathlib.Path'> | config | Relative directory for configuration files. |

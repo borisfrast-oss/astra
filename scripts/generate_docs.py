@@ -409,6 +409,18 @@ def _en_module_summary(module: str) -> Optional[str]:
     return SYMBOL_DOC_EN.get(module)
 
 
+def _render_default(value: object) -> str:
+    """Render a Pydantic/Click default value as a platform-neutral string.
+
+    Path objects are rendered via .as_posix() so that Windows working-trees
+    (backslash) and Linux runners (forward-slash) produce identical output.
+    All other types fall back to str().
+    """
+    if isinstance(value, Path):
+        return value.as_posix()
+    return str(value)
+
+
 def _redact_local_paths(text: str) -> str:
     """Redact user-specific Windows home paths from generated docs."""
     if not text:
@@ -665,7 +677,7 @@ def _walk_click_commands(cli_group):
             params.append({
                 "name": ", ".join(p.opts) if hasattr(p, "opts") else p.name,
                 "type": p_type,
-                "default": _redact_local_paths(str(p.default)) if p.default is not None else "",
+                "default": _redact_local_paths(_render_default(p.default)) if p.default is not None else "",
                 "help": _en_help(getattr(p, "help", "") or "", context=f"flag {p.opts}"),
                 "required": getattr(p, "required", False),
             })
@@ -686,7 +698,7 @@ def _walk_click_commands(cli_group):
                     sub_params.append({
                         "name": ", ".join(sp.opts) if hasattr(sp, "opts") else sp.name,
                         "type": st,
-                        "default": _redact_local_paths(str(sp.default)) if sp.default is not None else "",
+                        "default": _redact_local_paths(_render_default(sp.default)) if sp.default is not None else "",
                         "help": _en_help(getattr(sp, "help", "") or "", context=f"flag {sp.opts}"),
                     })
                 sub[sub_name] = {"help": _en_help(getattr(sub_cmd, "help", "") or "", context=f"subcommand {sub_name}"), "params": sub_params}
@@ -842,7 +854,7 @@ def gen_cli_reference() -> None:
                 grows.append([
                     f"`{pname}`",
                     ptype,
-                    _redact_local_paths(str(p.default)) if p.default is not None else "",
+                    _redact_local_paths(_render_default(p.default)) if p.default is not None else "",
                     _truncate_at_word(_en_help((getattr(p, "help", "") or ""), context=f"global flag {pname}"), 80),
                 ])
             writer.table(["Flag", "Type", "Default", "Description"], grows)
@@ -931,7 +943,7 @@ def gen_config_reference() -> None:
                 rows = []
                 for fname, finfo in fields.items():
                     ftype = str(finfo.annotation)[:60].replace("|", "/")
-                    default_raw = str(finfo.default)[:40] if finfo.default is not None else ""
+                    default_raw = _render_default(finfo.default)[:40] if finfo.default is not None else ""
                     default = _redact_local_paths(default_raw)
                     desc = getattr(finfo, "description", "") or ""
                     if not desc:
@@ -1060,7 +1072,7 @@ def gen_multi_group_doc() -> None:
                 rows.append([
                     f"`{pname}`",
                     ptype,
-                    _redact_local_paths(str(p.default)) if p.default is not None else "",
+                    _redact_local_paths(_render_default(p.default)) if p.default is not None else "",
                     _truncate_at_word(_en_help(getattr(p, "help", "") or "", context=f"flag {pname}"), 80),
                 ])
             if rows:
@@ -1088,7 +1100,7 @@ def gen_multi_group_doc() -> None:
                     merge_flags.append([
                         f"`{pname}`",
                         ptype,
-                        _redact_local_paths(str(p.default)) if p.default is not None else "",
+                        _redact_local_paths(_render_default(p.default)) if p.default is not None else "",
                         _truncate_at_word(_en_help(getattr(p, "help", "") or "", context=f"flag {pname}"), 100),
                     ])
         if merge_flags:
@@ -1240,7 +1252,7 @@ def gen_darks_doc() -> None:
                         rows.append([
                             f"`{pname}`",
                             ptype,
-                            _redact_local_paths(str(p.default)) if p.default is not None else "",
+                            _redact_local_paths(_render_default(p.default)) if p.default is not None else "",
                             _truncate_at_word(_en_help(getattr(p, "help", "") or "", context=f"flag {pname}"), 80),
                         ])
                     if rows:
