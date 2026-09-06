@@ -493,16 +493,34 @@ class DocWriter:
         print(f"  [OK] Generated: {self.output_path.relative_to(REPO_ROOT)}")
 
 
+def _read_normalised(path: Path) -> bytes:
+    """Read a file with EOL normalisation (CRLF→LF) for deterministic hashing.
+
+    Falls back to raw bytes for non-UTF-8 files (e.g. .pyc binaries), which
+    have no line-ending issues and are hashed as-is.
+    """
+    try:
+        return path.read_text(encoding="utf-8").encode("utf-8")
+    except UnicodeDecodeError:
+        return path.read_bytes()
+
+
 def file_hash(path: Path) -> str:
-    """SHA256 hash of file or directory content for change detection."""
+    """SHA256 hash of file or directory content for change detection.
+
+    Uses EOL-normalised content (CRLF→LF via universal newlines) so that
+    Windows working-trees (autocrlf=true, CRLF) and Linux runners / ZIP-
+    expanded trees (LF) produce identical hashes.  Binary files that cannot
+    be decoded as UTF-8 are hashed from raw bytes (no EOL issue there).
+    """
     if not path.exists():
         return ""
     if path.is_file():
-        return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+        return hashlib.sha256(_read_normalised(path)).hexdigest()[:16]
     hasher = hashlib.sha256()
     for file_path in sorted(path.rglob("*")):
         if file_path.is_file():
-            hasher.update(file_path.read_bytes())
+            hasher.update(_read_normalised(file_path))
     return hasher.hexdigest()[:16]
 
 
