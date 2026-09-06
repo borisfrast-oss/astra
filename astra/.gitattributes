@@ -1,6 +1,0 @@
-# Export-ignore: keep versioned in the monorepo but exclude from git-archive exports.
-cliff.toml export-ignore
-scripts/ci.ps1 export-ignore
-Makefile export-ignore
-scripts/poc_cfa_drizzle_subpixel.py export-ignore
-scripts/manual_integration.md export-ignore

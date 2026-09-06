@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "astra-pipeline"
-version = "1.10.0"
+version = "1.11.0"
 description = "Agentic Astrophotography Processing Pipeline"
 readme = "README.md"
 requires-python = ">=3.11"
