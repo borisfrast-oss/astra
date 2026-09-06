@@ -243,16 +243,37 @@ All Pre-Conditions MET:
 - ✅ astra-pipeline v1.11.0 available on PyPI (prod)
 - ✅ Install package architecture validated (dependencies resolved)
 - ⏳ Install completion + CLI smoke (pending, non-blocking for publish)
-- ✅ Wiki-repo ready for optional push (clean state)
+- ⏳ Wiki-repo: Klärung erforderlich (Repository-Existenz + Permissions)
 
-**GitHub Release-Notes:**
-- Pending: Create Release-Notes page on GitHub (v1.11.0)
-- DEF-010–014 summary available from warden-audit log
-- Feature list: Multi-Group stacking, PCC fixes, Drizzle fallback enhancements
+**GitHub Release-Notes (Schritt 7 — Boris Browser-UI):**
+- Status: ⏳ BORIS BROWSER-UI (gh CLI nicht verfügbar)
+- Klärversuch 1: Get-Command gh + Filesystem-Scan → gh.exe nicht in PATH
+- Action: Boris erstellt Release-Notes manuell via GitHub Browser
+  https://github.com/borisfrast-oss/astra/releases/new?tag=v1.11.0
+- Content-Vorlage (remy-generated):
+  * DEF-010..014 Hotfixes (M27 PCC-semantics, Plugin-Registry lazy, Preview-Path, PCC-skip logic)
+  * v1.11.0-Subset via --limit smoke (6 real-runs: M31, M27, C19, LDN935, M92, NGC6960)
+  * M7 Quality-Gate PASSED: 1136+2 tests, 12 real-läufe, 4/4 ghosting-free, 3/4 PCC plausibel
+  * Alpha-Hinweis: "Preview JPGs are quick-look only, not final publication"
+  * Build-Archiv: wheel 309KB + sdist 772KB (SHA256 in gate-log)
+
+**Wiki-Push Status (Schritt 6b Finale — Sicherheits-Stop):**
+- Attempt: git fetch origin/master → **FAILED**
+- Error: "remote: Repository not found" (astra.wiki.git)
+- Root-Cause Analysis:
+  * Remote configured: https://github.com/borisfrast-oss/astra.wiki.git
+  * Local state: cd7dc9c (51 files, v1.11-sync, working tree clean)
+  * GitHub response: Repository not found → wiki.git does not exist on GitHub OR auth-permission issue
+- Sicherheitsregel-Stop: Kein Force-Push, kein Rebase ohne Rückfrage
+- Action: Boris klärt wiki-repo-Status (Manual):
+  * Existiert astra.wiki.git auf GitHub?
+  * Hat Boris Push-Permissions auf wiki.git (separate Private-Wiki)?
+  * Soll wiki mit release-repo synchronisiert werden?
 
 ---
 
-**Gate-Log Status:** ✅ **PHASE 4–5 COMPLETE (Published to PyPI)**
-**Final Timestamp:** 2026-09-06 16:41:22Z (workflow success)
-**Agent:** remy (Release Manager, Phase 4–5 auto-execution)
-**Status:** Phase 1–5 ✅ COMPLETE → Awaiting Boris: GitHub Release-Notes + Optional Wiki-Push
+**Gate-Log Status:** ✅ **PHASE 4–5 PUBLISH COMPLETE (PyPI Live)**
+**Pending Boris Actions:** GitHub Release-Notes (UI) + Wiki-Push-Klärung
+**Final Timestamp:** 2026-09-06 16:41:22Z (publish.yml success)
+**Agent:** remy (Release Manager, Phase 4–5 execution + Sicherheits-Stops)
+**Status:** Phase 1–5 ✅ COMPLETE (PyPI) → Phase 6 ⏳ BORIS (Release-Notes + Wiki)
