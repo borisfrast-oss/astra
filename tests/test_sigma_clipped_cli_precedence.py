@@ -33,7 +33,9 @@ from astropy.io import fits
 from click.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from conftest import write_default_suggested  # noqa: E402
 from astro_process.cli import cli  # noqa: E402
 from astro_process.config.loader import DEFAULT_CONFIG  # noqa: E402
 from astro_process.core import stacking as stacking_mod  # noqa: E402
@@ -96,10 +98,12 @@ class TestB1CliAccepts:
         akzeptiert und erzeugt einen Stack mit der neuen Methode (verifizierbar
         via cli.process.stacking Log method)."""
         target = _create_light_target(tmp_path)
+        write_default_suggested(target)
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["process", str(target), "--dry-run", "--stacking-method", "sigma_clipped_mean"],
+            ["process", str(target), "--dry-run", "--from-suggested",
+             "--stacking-method", "sigma_clipped_mean"],
         )
         assert result.exit_code == 0, result.output
         assert "cli.process.stacking" in result.output
@@ -129,11 +133,13 @@ class TestB2ConfigAndPrecedence:
         """B2a: stacking_method: sigma_clipped_mean in der config.yaml
         (processing_params) fuehrt zur neuen Methode (ohne CLI-Flag)."""
         target = _create_light_target(tmp_path)
+        write_default_suggested(target)
         cfg_path = _write_config_with_preset_stacking(tmp_path, "star_standard", "sigma_clipped_mean")
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["-c", str(cfg_path), "process", str(target), "--dry-run", "--preset", "star_standard"],
+            ["-c", str(cfg_path), "process", str(target), "--dry-run",
+             "--from-suggested", "--preset", "star_standard"],
         )
         assert result.exit_code == 0, result.output
         assert '"method": "sigma_clipped_mean"' in result.output or '"method":"sigma_clipped_mean"' in result.output
@@ -141,6 +147,7 @@ class TestB2ConfigAndPrecedence:
     def test_b2_cli_overrides_config(self, tmp_path: Path):
         """B2b: CLI-Flag ueberschreibt Config (Precedence CLI > Preset/Config)."""
         target = _create_light_target(tmp_path)
+        write_default_suggested(target)
         # Config will sigma_clipped_mean, CLI will average -> average gewinnt
         cfg_path = _write_config_with_preset_stacking(tmp_path, "star_standard", "sigma_clipped_mean")
         runner = CliRunner()
@@ -148,15 +155,13 @@ class TestB2ConfigAndPrecedence:
             cli,
             [
                 "-c", str(cfg_path), "process", str(target), "--dry-run",
-                "--preset", "star_standard",
+                "--from-suggested", "--preset", "star_standard",
                 "--stacking-method", "average",
             ],
         )
         assert result.exit_code == 0, result.output
         assert '"method": "average"' in result.output or '"method":"average"' in result.output
         # Gegenprobe: sigma_clipped_mean darf NICHT mehr drinstehen als effektive Methode
-        # (darf aber als rejection im Log erscheinen wenn vorhanden — hier nicht)
-        # Wir pruefen explizit dass die effektive Methode average ist, nicht sigma
         assert '"cli_override": "average"' in result.output or '"cli_override":"average"' in result.output
 
     def test_b2_resolve_stack_method_precedence_direct(self):
@@ -192,12 +197,16 @@ class TestB3DefaultUnchanged:
     def test_b3_cli_without_flag_keeps_preset_mapping(self, tmp_path: Path):
         """Ohne --stacking-method Flag bleibt Preset-Mapping wirksam (nebula_standard + star_standard winsorized)."""
         target = _create_light_target(tmp_path)
+        write_default_suggested(target, preset="nebula_standard")
         runner = CliRunner()
-        result = runner.invoke(cli, ["process", str(target), "--dry-run", "--preset", "nebula_standard"])
+        result = runner.invoke(cli, ["process", str(target), "--dry-run", "--from-suggested",
+                                     "--preset", "nebula_standard"])
         assert result.exit_code == 0, result.output
         assert '"method": "winsorized"' in result.output
-        # star_standard -> winsorized (DEF-006 V1.8-8: rejection average → winsorized, verwirft Outlier statt Ghosting zu mitteln)
-        result2 = runner.invoke(cli, ["process", str(target), "--dry-run", "--preset", "star_standard"])
+        # star_standard -> winsorized
+        write_default_suggested(target, preset="star_standard")
+        result2 = runner.invoke(cli, ["process", str(target), "--dry-run", "--from-suggested",
+                                      "--preset", "star_standard"])
         assert result2.exit_code == 0, result2.output
         assert '"method": "winsorized"' in result2.output
 

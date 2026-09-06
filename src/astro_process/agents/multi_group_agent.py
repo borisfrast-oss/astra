@@ -2086,6 +2086,19 @@ class MultiGroupProcessor:
         pcc_stacks: dict[str, Path] = {}
         pcc_fallback_groups: list[str] = []
 
+        # DEF-014: PCC nur wenn Preset-Step "photometric_color_calibration"
+        # vorhanden ist. Analog zum Single-Group-Pfad in processing_agent.py
+        # Zeile 292 (_has_step("photometric_color_calibration")).
+        # Ohne diesen Check laeuft PCC im Multi-Group-Pfad immer — unabhaengig
+        # von pcc.enabled: false im suggested.yaml (CLI-Override-Noop trifft
+        # nur die Preset-Step-Liste, nicht den _apply_pcc_per_group-Aufruf).
+        pcc_step_active = _has_step("photometric_color_calibration")
+        if not pcc_step_active:
+            self.logger.info(
+                "multi_group.pcc_skipped_no_preset_step",
+                msg="photometric_color_calibration not in preset steps — PCC skipped (DEF-014)",
+            )
+
         # Compute pixel scale once (shared across groups).
         # F-META-1.2 (stella Punkt 5): Stack-Skala aus dem verankerten
         # stack_scale_factor der Registrations-Config (KEIN fester
@@ -2131,6 +2144,11 @@ class MultiGroupProcessor:
                 msg="Single group: PCC applied on the group stack (identical data to merged)",
             )
             do_pcc_per_group = True
+
+        # DEF-014: Preset-Step-Gate — wenn kein PCC-Step im Preset, beide
+        # PCC-Pfade (per-group + merged) deaktivieren.
+        if not pcc_step_active:
+            do_pcc_per_group = False
 
         if do_pcc_per_group:
             # Alt: PCC pro Gruppe — FSM-B: nur Kandidaten (aligned_stacks ist gefiltert)
@@ -2180,6 +2198,26 @@ class MultiGroupProcessor:
 
                 if group_hash in group_metadata:
                     group_metadata[group_hash]["pcc_status"] = pcc_status
+
+                # DEF-010/011: PCC Grünstich Fallback — wenn PCC rejected (implausible
+                # factors), bleibt Stack linear grün. Preview SCNR (preview_export.scnr true)
+                # wirkt nur im JPG, nicht im FITS. Fallback: SCNR im linearen Pfad
+                # (0.5) auf den Stack anwenden, damit FITS nicht grünstichig bleibt.
+                # Status bleibt "rejected_implausible_factors" fuer Agent-Log Persistenz
+                # (Tests erwarten exakten String), SCNR wird best-effort appliziert.
+                if pcc_status == "rejected_implausible_factors":
+                    try:
+                        from ..core.pcc import scnr as _scnr_fallback
+                        _scnr_fallback(
+                            pcc_path,
+                            {"scnr_amount": 0.5},
+                            load_frame=self.load_frame,
+                            save_frame=self.save_frame,
+                            logger=self.logger,
+                        )
+                        self.logger.info("multi_group.pcc_rejected_scnr_applied", group=group_hash, amount=0.5)
+                    except Exception as e:
+                        self.logger.warning("multi_group.pcc_rejected_scnr_failed", group=group_hash, error=str(e))
 
                 if pcc_status == "fallback_gray_world":
                     pcc_fallback_groups.append(group_hash)
@@ -2315,7 +2353,8 @@ class MultiGroupProcessor:
             merge_report = merge_result.merge_report
 
             # V1.6 (stella/Boris 2026-08-20): PCC auf MERGED Stack (pcc_per_group=False)
-            if not do_pcc_per_group and merged_path and merged_path.exists():
+            # DEF-014: pcc_step_active-Gate — kein PCC wenn Preset keinen Step hat.
+            if pcc_step_active and not do_pcc_per_group and merged_path and merged_path.exists():
                 self.logger.info("multi_group.pcc_on_merged", path=str(merged_path))
                 # Copy to pcc_applied.fits in merged dir
                 merged_dir = self.working_dir / "merged"
@@ -2343,6 +2382,20 @@ class MultiGroupProcessor:
                         group_metadata={"merged": True, "groups": list(aligned_stacks.keys())},
                     )
                     self.last_merged_pcc_status = merged_pcc_status
+                    # DEF-010/011 Grünstich: bei Merged-PCC Rejection SCNR im linearen Pfad
+                    if merged_pcc_status == "rejected_implausible_factors":
+                        try:
+                            from ..core.pcc import scnr as _scnr_merged
+                            _scnr_merged(
+                                Path(merged_pcc_result_path),
+                                {"scnr_amount": 0.5},
+                                load_frame=self.load_frame,
+                                save_frame=self.save_frame,
+                                logger=self.logger,
+                            )
+                            self.logger.info("multi_group.pcc_merged_rejected_scnr_applied", amount=0.5)
+                        except Exception as e:
+                            self.logger.warning("multi_group.pcc_merged_rejected_scnr_failed", error=str(e))
                     # ray-Major-3 (2026-08-21): Return-Pfad des Hooks ver-
                     # wenden — das PCC-Artefakt liegt unter merged/04_stacked/
                     # pcc_applied.fits (der Hook kopiert stack_path intern

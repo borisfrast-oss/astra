@@ -37,6 +37,7 @@ from astro_process.config.models import (  # noqa: E402
     PipelineStep,
     ProcessingParams,
 )
+from conftest import write_default_suggested  # noqa: E402
 
 
 def _preset(gr: GradientRemovalConfig | None = None) -> PipelinePreset:
@@ -333,9 +334,11 @@ class TestCliGradientRemovalFlags:
         Config im Preset verankert, Log `cli.process.gradient_removal` zeigt
         enabled=true (Precedence CLI > Default)."""
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target)
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["process", str(target), "--dry-run", "--gradient-removal-enabled"]
+            cli, ["process", str(target), "--dry-run", "--from-suggested",
+                  "--gradient-removal-enabled"]
         )
         assert result.exit_code == 0, result.output
         assert '"enabled": true' in result.output
@@ -346,6 +349,7 @@ class TestCliGradientRemovalFlags:
         -> enabled false gewinnt (CLI > Config); degree/grid aus der Config
         bleiben (nur enabled wird vom CLI ueberschrieben)."""
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target)
         cfg_path = _write_default_based_config(
             tmp_path,
             {"gradient_removal": {
@@ -357,7 +361,7 @@ class TestCliGradientRemovalFlags:
         result = runner.invoke(
             cli,
             ["-c", str(cfg_path), "process", str(target), "--dry-run",
-             "--gradient-removal-disabled"],
+             "--from-suggested", "--gradient-removal-disabled"],
         )
         assert result.exit_code == 0, result.output
         assert '"enabled": false' in result.output
@@ -369,9 +373,10 @@ class TestCliGradientRemovalFlags:
         """--gradient-removal-grid '16,16' -> grid (16, 16) im effektiven
         Ergebnis (CLI > Default)."""
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target)
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["process", str(target), "--dry-run",
+            cli, ["process", str(target), "--dry-run", "--from-suggested",
                   "--gradient-removal-grid", "16,16"]
         )
         assert result.exit_code == 0, result.output
@@ -380,9 +385,10 @@ class TestCliGradientRemovalFlags:
     def test_cli_grid_invalid(self, tmp_path):
         """Ungueltiges --gradient-removal-grid -> ClickException, Exit != 0."""
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target)
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["process", str(target), "--dry-run",
+            cli, ["process", str(target), "--dry-run", "--from-suggested",
                   "--gradient-removal-grid", "nope"]
         )
         assert result.exit_code != 0
@@ -392,13 +398,15 @@ class TestCliGradientRemovalFlags:
         """Config gradient_removal.enabled=true wirkt ohne CLI-Flag
         (Config-Ebene erreicht die effektive Config)."""
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target)
         cfg_path = _write_default_based_config(
             tmp_path,
             {"gradient_removal": {"enabled": True}},
         )
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["-c", str(cfg_path), "process", str(target), "--dry-run"]
+            cli, ["-c", str(cfg_path), "process", str(target), "--dry-run",
+                  "--from-suggested"]
         )
         assert result.exit_code == 0, result.output
         assert '"enabled": true' in result.output

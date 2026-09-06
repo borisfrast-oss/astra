@@ -390,7 +390,14 @@ class TestMergedPccStatusPersistence:
         )
         pipeline = MagicMock()
         pipeline.processing_params = ProcessingParams()
-        pipeline.steps = []
+        # DEF-014-Fix: photometric_color_calibration-Step noetig damit PCC laeuft
+        from astro_process.config.models import PipelineStep  # noqa: F401
+        pipeline.steps = [
+            PipelineStep(name="register_frames"),
+            PipelineStep(name="stack_frames"),
+            PipelineStep(name="photometric_color_calibration"),
+            PipelineStep(name="export"),
+        ]
 
         lights = context.get_lights()
         cal_result = MagicMock()

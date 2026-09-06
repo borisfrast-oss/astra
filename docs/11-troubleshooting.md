@@ -142,12 +142,12 @@ cfa_drizzle:
 
 | Exit code | Location |
 | --- | --- |
-| 0 | src/astro_process/cli.py:3357 |
-| 0 | src/astro_process/cli.py:3361 |
-| 0 | src/astro_process/cli.py:3366 |
-| 1 | src/astro_process/cli.py:3339 |
-| 2 | src/astro_process/cli.py:1266 |
-| 2 | src/astro_process/cli.py:655 |
+| 0 | src/astro_process/cli.py:3467 |
+| 0 | src/astro_process/cli.py:3471 |
+| 0 | src/astro_process/cli.py:3476 |
+| 1 | src/astro_process/cli.py:3449 |
+| 2 | src/astro_process/cli.py:1327 |
+| 2 | src/astro_process/cli.py:720 |
 
 ## Known issues reflected in releases
 

@@ -181,9 +181,11 @@ class TestPluginRegistry:
         with patch("astro_process.core.plugins.logger", recorder):
             registry.register(second)
 
-        # W1 (2026-08-05): der real installierte structure_enhancement-EP wird
-        # lazy geladen — fuer diesen Unit-Test Entry-Points leeren.
+        # DEF-013: _register_builtin_plugins + Entry-Points leeren, damit
+        # structure_enhancement den isolierten Duplikat-Test nicht stoert.
         with patch(
+            "astro_process.core.plugins._register_builtin_plugins",
+        ), patch(
             "astro_process.core.plugins.importlib.metadata.entry_points",
             return_value=[],
         ):
@@ -200,7 +202,10 @@ class TestPluginRegistry:
         ep = _entry_point_mock("dummy", _load_dummy_plugin())
         recorder = _LogRecorder()
 
+        # DEF-013: _register_builtin_plugins leeren, damit nur der Dummy-EP zaehlt.
         with patch("astro_process.core.plugins.logger", recorder), patch(
+            "astro_process.core.plugins._register_builtin_plugins",
+        ), patch(
             "astro_process.core.plugins.importlib.metadata.entry_points",
             return_value=[ep],
         ):
@@ -345,12 +350,14 @@ class TestPluginListCli:
     def test_list_without_plugins_exit_zero(self):
         """AC-PL-C1: `astra plugin list` ohne installierte Plugins -> Exit 0,
         leere Liste, keine Fehler."""
-        # W1 (2026-08-05): Default-Registry zuruecksetzen + Entry-Points leeren
-        # — sonst laedt der lazy Cache den real installierten
-        # structure_enhancement-EP in die Singleton-Registry.
+        # DEF-013: Default-Registry + _register_builtin_plugins + Entry-Points leeren
+        # — sonst laedt der lazy Cache das Builtin structure_enhancement in die
+        # frisch erstellte Singleton-Registry.
         with patch(
             "astro_process.core.plugins._default_registry",
             PluginRegistry(),
+        ), patch(
+            "astro_process.core.plugins._register_builtin_plugins",
         ), patch(
             "astro_process.core.plugins.importlib.metadata.entry_points",
             return_value=[],
@@ -361,9 +368,12 @@ class TestPluginListCli:
 
     def test_list_json_without_plugins(self):
         """AC-PL-C1: `astra plugin list --json` ohne Plugins -> Exit 0, []."""
+        # DEF-013: _register_builtin_plugins leeren (siehe test_list_without_plugins_exit_zero)
         with patch(
             "astro_process.core.plugins._default_registry",
             PluginRegistry(),
+        ), patch(
+            "astro_process.core.plugins._register_builtin_plugins",
         ), patch(
             "astro_process.core.plugins.importlib.metadata.entry_points",
             return_value=[],
@@ -391,9 +401,11 @@ class TestPluginListCli:
         registry = PluginRegistry(injected=[_load_dummy_plugin()])
         monkeypatch.setattr(plugins_mod, "_default_registry", registry)
 
-        # W1 (2026-08-05): Entry-Points leeren, damit der real installierte
-        # structure_enhancement-EP die JSON-Liste nicht aufblaeht.
+        # DEF-013: _register_builtin_plugins + Entry-Points leeren, damit
+        # structure_enhancement die JSON-Liste nicht aufblaeht.
         with patch(
+            "astro_process.core.plugins._register_builtin_plugins",
+        ), patch(
             "astro_process.core.plugins.importlib.metadata.entry_points",
             return_value=[],
         ):

@@ -42,6 +42,9 @@ from astro_process.cli import cli  # noqa: E402
 from astro_process.config import loader as config_loader  # noqa: E402
 from astro_process.config.loader import DEFAULT_CONFIG  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from conftest import write_default_suggested  # noqa: E402
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Test Helpers
@@ -105,6 +108,20 @@ def _invoke_process_mocked(runner: CliRunner, args: list[str], tmp_path: Path):
     proc.run.return_value = MagicMock(stacked=None)
     arch = MagicMock()
     arch.run.return_value = MagicMock(output_dir=tmp_path, final_fits=None)
+
+    # V1.11: extract target dir from args to write suggested.yaml
+    _target_arg = None
+    for i, a in enumerate(args):
+        if a == "process" and i + 1 < len(args):
+            _target_arg = Path(args[i + 1])
+            break
+    if _target_arg is not None and _target_arg.is_dir():
+        write_default_suggested(_target_arg)
+        # Inject --from-suggested if not already present
+        _process_idx = next((i for i, a in enumerate(args) if a == "process"), None)
+        if _process_idx is not None and "--from-suggested" not in args:
+            args = list(args)
+            args.insert(_process_idx + 2, "--from-suggested")
 
     with patch("astro_process.cli.create_discovery_agent", return_value=discovery), \
          patch("astro_process.cli.create_calibration_agent", side_effect=_make_cal), \
@@ -288,7 +305,8 @@ class TestB1ConfigDiscovery:
 class TestB1CliAutodiscovery:
     def test_process_without_config_flag_uses_cwd_config(self, tmp_path, monkeypatch):
         """CLI: `process <target> --dry-run` OHNE --config nutzt die config.yaml
-        des CWD (default_preset nebula_standard statt DEFAULT star_standard)."""
+        des CWD. V1.11: preset kommt aus suggested.yaml (nicht aus default_preset).
+        Test prueft Config-Discovery (config.loaded_from) statt default_preset-Inferenz."""
         cfgdir = tmp_path / "cfgdir"
         cfgdir.mkdir()
         _write_default_based_config(
@@ -296,17 +314,20 @@ class TestB1CliAutodiscovery:
         )
         target = tmp_path / "Target"
         target.mkdir()
+        # V1.11: Preset kommt aus File (nebula_standard), nicht aus Config default_preset
+        write_default_suggested(target, preset="nebula_standard")
         monkeypatch.chdir(cfgdir)
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["process", str(target), "--dry-run"])
+        result = runner.invoke(cli, ["process", str(target), "--dry-run", "--from-suggested"])
 
         assert result.exit_code == 0, result.output
         assert "Pipeline: nebula_standard" in result.output
 
     def test_process_without_config_equals_explicit_config(self, tmp_path, monkeypatch):
         """Verifikation (stella-Auftrag): Lauf ohne --config (CWD mit
-        config.yaml) ist identisch zum Lauf mit explizitem --config."""
+        config.yaml) ist identisch zum Lauf mit explizitem --config.
+        V1.11: preset kommt aus suggested.yaml; config wird fuer registration/debayer-Fallback genutzt."""
         cfgdir = tmp_path / "cfgdir"
         other = tmp_path / "other"
         cfgdir.mkdir()
@@ -316,12 +337,13 @@ class TestB1CliAutodiscovery:
         )
         target = tmp_path / "Target"
         target.mkdir()
+        write_default_suggested(target, preset="nebula_standard")
 
         runner = CliRunner()
 
         # Lauf A: ohne --config, CWD = cfgdir (config.yaml wird entdeckt)
         monkeypatch.chdir(cfgdir)
-        result_a = runner.invoke(cli, ["process", str(target), "--dry-run"])
+        result_a = runner.invoke(cli, ["process", str(target), "--dry-run", "--from-suggested"])
         assert result_a.exit_code == 0, result_a.output
         assert "Pipeline: nebula_standard" in result_a.output
 
@@ -329,7 +351,8 @@ class TestB1CliAutodiscovery:
         monkeypatch.chdir(other)
         result_b = runner.invoke(
             cli,
-            ["-c", str(cfgdir / "config.yaml"), "process", str(target), "--dry-run"],
+            ["-c", str(cfgdir / "config.yaml"), "process", str(target), "--dry-run",
+             "--from-suggested"],
         )
         assert result_b.exit_code == 0, result_b.output
         assert "Pipeline: nebula_standard" in result_b.output
@@ -399,6 +422,7 @@ class TestB2DarksFallback:
         _write_default_based_config(cfgdir / "config.yaml")
         target = tmp_path / "Target"
         target.mkdir()
+        write_default_suggested(target)
         monkeypatch.chdir(cfgdir)
 
         discovery = MagicMock()
@@ -406,7 +430,7 @@ class TestB2DarksFallback:
 
         runner = CliRunner()
         with patch("astro_process.cli.create_discovery_agent", return_value=discovery):
-            result = runner.invoke(cli, ["process", str(target)])
+            result = runner.invoke(cli, ["process", str(target), "--from-suggested"])
 
         assert result.exit_code == 1, result.output
         assert "darks_repository" in result.output

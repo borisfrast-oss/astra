@@ -15,6 +15,33 @@ from ..models.core import ObservationContext, compute_group_hash
 logger = structlog.get_logger(__name__)
 
 
+def _get_pipeline_version() -> str:
+    """Versions-Lookup analog _resolve_cli_version() in cli.py.
+
+    Fallback-Kette: astra-pipeline (aktueller Dist-Name) -> astra (Legacy-
+    Editable) -> 0.0.0+dev (Quellcode ohne Install). Ersetzt den Hardcode
+    "0.1.0" in agent-log.yaml und run-info.json.
+    """
+    try:
+        from importlib.metadata import PackageNotFoundError
+        from importlib.metadata import version as _meta_version
+    except ImportError:
+        try:
+            from importlib_metadata import PackageNotFoundError  # type: ignore[no-redef]
+            from importlib_metadata import version as _meta_version  # type: ignore[no-redef]
+        except ImportError:
+            return "0.0.0+dev"
+    for dist_name in ("astra-pipeline", "astra"):
+        try:
+            return _meta_version(dist_name)
+        except PackageNotFoundError:
+            pass
+    return "0.0.0+dev"
+
+
+_PIPELINE_VERSION = _get_pipeline_version()
+
+
 @dataclass
 class ArchiveResult:
     output_dir: Path
@@ -36,7 +63,10 @@ class ArchiveAgent:
             debayer_result=None,
             discovery_result=None,
             keep_working: bool = False,
-            multi_group_metadata: dict | None = None) -> ArchiveResult:
+            multi_group_metadata: dict | None = None,
+            smoke_mode: bool = False,
+            smoke_limit: int | None = None,
+            smoke_frames_total: int | None = None) -> ArchiveResult:
         """Create processing log.
         
         Args:
@@ -47,6 +77,9 @@ class ArchiveAgent:
             discovery_result: Discovery result (optional)
             keep_working: Whether to keep working directory
             multi_group_metadata: Multi-group metadata dict for agent-log (optional)
+            smoke_mode: V1.11-SUBSET — True if --limit was active (AC-SUBSET-3).
+            smoke_limit: V1.11-SUBSET — N from --limit (or None if not active).
+            smoke_frames_total: V1.11-SUBSET — total lights before limit (or None).
         """
         logger.info("archive.start", target=context.target.name)
 
@@ -66,6 +99,9 @@ class ArchiveAgent:
             debayer_result=debayer_result,
             discovery_result=discovery_result,
             multi_group_metadata=multi_group_metadata,
+            smoke_mode=smoke_mode,
+            smoke_limit=smoke_limit,
+            smoke_frames_total=smoke_frames_total,
         )
 
         # Fix-Sammlung v1.3 §3 (P0): run-info.json im Lauf-Ordner
@@ -75,6 +111,9 @@ class ArchiveAgent:
             proc_result=proc_result,
             discovery_result=discovery_result,
             multi_group_metadata=multi_group_metadata,
+            smoke_mode=smoke_mode,
+            smoke_limit=smoke_limit,
+            smoke_frames_total=smoke_frames_total,
         )
 
         logger.info("archive.complete", output_dir=str(output_dir))
@@ -87,6 +126,9 @@ class ArchiveAgent:
         proc_result=None,
         discovery_result=None,
         multi_group_metadata: dict | None = None,
+        smoke_mode: bool = False,
+        smoke_limit: int | None = None,
+        smoke_frames_total: int | None = None,
     ) -> Path | None:
         """Fix-Sammlung v1.3 §3 (P0): `run-info.json` im Lauf-Ordner.
 
@@ -109,7 +151,7 @@ class ArchiveAgent:
         run_info: dict[str, Any] = {
             "run": {
                 "date": datetime.now().isoformat(),
-                "version": "0.1.0",
+                "version": _PIPELINE_VERSION,
             },
             "acquisition": {
                 "eq": (
@@ -129,6 +171,17 @@ class ArchiveAgent:
             ),
             "pcc_status": getattr(proc_result, "pcc_status", None) if proc_result is not None else None,
         }
+
+        # V1.11-SUBSET (AC-SUBSET-3): Smoke-Mode Marker — nur wenn --limit aktiv.
+        # Ohne --limit: Felder absent (AC-SUBSET-4: byte-identisch zu heute).
+        if smoke_mode:
+            run_info["smoke_mode"] = True
+            run_info["limit"] = smoke_limit
+            # frames_considered = Anzahl Lights nach Limit (= min(frames_total, limit) je Gruppe,
+            # aggregiert). Nach dem Limit-Slice ist context.total_light_frames bereits
+            # die effektive Zahl (Lights wurden in-place gekuerzt in cli.py).
+            run_info["frames_considered"] = context.total_light_frames
+            run_info["frames_total"] = smoke_frames_total
 
         log_path = output_dir / "run-info.json"
         try:
@@ -336,11 +389,56 @@ class ArchiveAgent:
             return value
         return None
 
+    def _build_discovery_section(
+        self,
+        context: ObservationContext,
+        smoke_mode: bool = False,
+        smoke_limit: int | None = None,
+        smoke_frames_total: int | None = None,
+    ) -> dict:
+        """V1.11-SUBSET (AC-SUBSET-3): Discovery-Sektion fuer agent-log.yaml.
+
+        Ohne --limit: minimale Sektion (smoke_test_active: false).
+        Mit --limit: erweiterte Sektion mit Smoke-Marker + je-Gruppe Statistik
+        (lights_total / lights_selected).
+
+        Die Gruppen-Statistik wird aus dem (bereits gekürzten) Context abgeleitet.
+        Da context.get_lights().frames nach dem Limit-Slice in cli.py nur noch
+        die selektierten Frames enthält, rekonstruieren wir lights_selected
+        direkt; lights_total ergibt sich aus smoke_frames_total (vor dem Slice,
+        von cli.py übergeben).
+        """
+        if not smoke_mode:
+            return {"smoke_test_active": False}
+
+        # Gruppen aus dem (bereits gekürzten) Context
+        lights = context.get_lights()
+        groups_by_params = lights.group_by_params()
+
+        group_entries = []
+        for (exptime, gain, filter_name), frameset in groups_by_params.items():
+            from astro_process.models.core import compute_group_hash as _cgh
+            group_name = _cgh(float(exptime), int(gain), str(filter_name))
+            group_entries.append({
+                "name": group_name,
+                "lights_selected": frameset.count,
+            })
+
+        return {
+            "smoke_test_active": True,
+            "limit_per_group": smoke_limit,
+            "lights_total": smoke_frames_total,
+            "groups": group_entries,
+        }
+
     def _create_agent_log(self, output_dir: Path, context: ObservationContext,
                          proc_result, calibration_result,
                          debayer_result=None,
                          discovery_result=None,
-                         multi_group_metadata: dict | None = None) -> Path:
+                         multi_group_metadata: dict | None = None,
+                         smoke_mode: bool = False,
+                         smoke_limit: int | None = None,
+                         smoke_frames_total: int | None = None) -> Path:
         """Create agent-log.yaml with processing summary."""
 
         safe_name = context.target.name.replace(" ", "_").replace("(", "").replace(")", "")
@@ -349,7 +447,7 @@ class ArchiveAgent:
         log = {
             "run": {
                 "date": datetime.now().isoformat(),
-                "version": "0.1.0",
+                "version": _PIPELINE_VERSION,
             },
             "target": {
                 "name": context.target.name,
@@ -364,6 +462,15 @@ class ArchiveAgent:
                 "flats": context.calibration.flat_count,
                 "bias": context.calibration.bias_count,
             },
+            # V1.11-SUBSET (AC-SUBSET-3): Discovery-Sektion mit Smoke-Marker.
+            # Ohne --limit: smoke_test_active: false, restliche Felder absent (AC-SUBSET-4).
+            # Mit --limit: smoke_test_active: true + limit_per_group + lights_total/selected je Gruppe.
+            "discovery": self._build_discovery_section(
+                context,
+                smoke_mode=smoke_mode,
+                smoke_limit=smoke_limit,
+                smoke_frames_total=smoke_frames_total,
+            ),
             "calibration": {
                 "master_dark": str(calibration_result.master_dark) if calibration_result.master_dark else None,
                 "calibrated_lights": len(calibration_result.calibrated_lights),

@@ -19,7 +19,9 @@ import yaml
 from click.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from conftest import write_default_suggested  # noqa: E402
 from astro_process.cli import cli  # noqa: E402
 from astro_process.config.loader import DEFAULT_CONFIG  # noqa: E402
 
@@ -69,7 +71,8 @@ def _mock_discovery(total_lights=1):
 
 
 def _invoke_process(runner, args, tmp_path):
-    """Invoke process with mocked agents. Returns (result, captured_dict)."""
+    """Invoke process with mocked agents. Returns (result, captured_dict).
+    V1.11: injects --from-suggested and writes suggested.yaml in target dir."""
     captured = {}
     discovery = _mock_discovery()
 
@@ -91,19 +94,30 @@ def _invoke_process(runner, args, tmp_path):
     arch = MagicMock()
     arch.run.return_value = MagicMock(output_dir=tmp_path, final_fits=None)
 
+    # V1.11: find target dir from args and write suggested.yaml
+    _args = list(args)
+    _process_idx = next((i for i, a in enumerate(_args) if a == "process"), None)
+    if _process_idx is not None and _process_idx + 1 < len(_args):
+        _target = Path(_args[_process_idx + 1])
+        if _target.is_dir():
+            write_default_suggested(_target)
+            if "--from-suggested" not in _args:
+                _args.insert(_process_idx + 2, "--from-suggested")
+
     with patch("astro_process.cli.create_discovery_agent", return_value=discovery), \
          patch("astro_process.cli.create_calibration_agent", side_effect=_make_cal), \
          patch("astro_process.cli.create_cosmetic_agent", return_value=MagicMock(run=MagicMock(return_value=None))), \
          patch("astro_process.cli.create_debayer_agent", return_value=deb), \
          patch("astro_process.cli.create_processing_agent", return_value=proc), \
          patch("astro_process.cli.create_archive_agent", return_value=arch):
-        result = runner.invoke(cli, args)
+        result = runner.invoke(cli, _args)
 
     return result, captured, discovery, proc
 
 
 def _invoke_process_with_proc(runner, args, tmp_path, proc):
-    """Invoke process with a pre-configured processing agent mock."""
+    """Invoke process with a pre-configured processing agent mock.
+    V1.11: injects --from-suggested and writes suggested.yaml in target dir."""
     discovery = _mock_discovery()
     cal = MagicMock()
     cal.run.return_value = MagicMock(master_dark=None, calibrated_lights=[])
@@ -112,13 +126,23 @@ def _invoke_process_with_proc(runner, args, tmp_path, proc):
     arch = MagicMock()
     arch.run.return_value = MagicMock(output_dir=tmp_path, final_fits=None)
 
+    # V1.11: inject --from-suggested
+    _args = list(args)
+    _process_idx = next((i for i, a in enumerate(_args) if a == "process"), None)
+    if _process_idx is not None and _process_idx + 1 < len(_args):
+        _target = Path(_args[_process_idx + 1])
+        if _target.is_dir():
+            write_default_suggested(_target)
+            if "--from-suggested" not in _args:
+                _args.insert(_process_idx + 2, "--from-suggested")
+
     with patch("astro_process.cli.create_discovery_agent", return_value=discovery), \
          patch("astro_process.cli.create_calibration_agent", return_value=cal), \
          patch("astro_process.cli.create_cosmetic_agent", return_value=MagicMock(run=MagicMock(return_value=None))), \
          patch("astro_process.cli.create_debayer_agent", return_value=deb), \
          patch("astro_process.cli.create_processing_agent", return_value=proc), \
          patch("astro_process.cli.create_archive_agent", return_value=arch):
-        result = runner.invoke(cli, args)
+        result = runner.invoke(cli, _args)
 
     return result, discovery, proc
 
@@ -146,9 +170,11 @@ class TestV15_6DryRunFactory:
             ),
         }
 
+        write_default_suggested(target)
         runner = CliRunner()
         with patch("astro_process.cli.create_discovery_agent", return_value=discovery) as factory_mock:
-            result = runner.invoke(cli, ["process", str(target), "--dry-run", "--multi-group"])
+            result = runner.invoke(cli, ["process", str(target), "--dry-run",
+                                         "--from-suggested", "--multi-group"])
 
         assert result.exit_code == 0, result.output
         # Factory must be called, not DiscoveryAgent()
@@ -165,9 +191,10 @@ class TestV15_6DryRunFactory:
         discovery = _mock_discovery()
         discovery.discover_groups.return_value = {}
 
+        write_default_suggested(target)
         runner = CliRunner()
         with patch("astro_process.cli.create_discovery_agent", return_value=discovery) as factory_mock:
-            result = runner.invoke(cli, ["process", str(target), "--dry-run"])
+            result = runner.invoke(cli, ["process", str(target), "--dry-run", "--from-suggested"])
 
         assert result.exit_code == 0, result.output
         factory_mock.assert_called()
@@ -351,7 +378,9 @@ class TestV15_13SEOverrideFlags:
                 "processing_params": {"rejection": "average"},
             }]
             cfg.write_text(yaml.safe_dump(cfg_content, sort_keys=False), encoding="utf-8")
-            result = runner.invoke(cli, ["process", str(target), "--se-radius", "5.0", "--se-amount", "0.5"])
+            write_default_suggested(target)
+            result = runner.invoke(cli, ["process", str(target), "--from-suggested",
+                                         "--se-radius", "5.0", "--se-amount", "0.5"])
 
         assert result.exit_code == 0, result.output
         # The step params should have been modified

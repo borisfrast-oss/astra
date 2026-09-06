@@ -35,20 +35,6 @@ def _resolve_cli_version() -> str:
             pass
     return "0.0.0+dev"
 
-
-def _apply_resolver_result(effective_registration, resolver_result: dict) -> None:
-    """Propagate resolver-derived registration fields onto the effective config.
-
-    Mirrors the assignment logic used when a smart default overrides the
-    config/preset default. Extracted for testability (no false coverage).
-    """
-    if resolver_result.get("method") is not None:
-        effective_registration.method = resolver_result["method"]
-    if resolver_result.get("max_rotation_deg") is not None:
-        effective_registration.max_rotation_deg = float(resolver_result["max_rotation_deg"])
-    if resolver_result.get("max_exptime_fft_warn") is not None:
-        effective_registration.max_exptime_fft_warn = float(resolver_result["max_exptime_fft_warn"])
-
 try:
     from rich.console import Console
     from rich.panel import Panel
@@ -566,19 +552,47 @@ def cli(ctx, config, verbose):
         "debayerte 3D-RGB-Lights fuehren beim Debayer-Schritt zu einem Fehler."
     ),
 )
-# V19-1.10-TARGET-ADVISOR SUG-5: einziges neues Flag, kein Auto-Discover.
-# Precedence CLI > suggested File > Config > Preset > Default (analog
-# V19-PCC-FLAG). `--params-file` Alias VERWORFEN (OQ-SUG-5, nicht
-# implementieren). Ohne dieses Flag ist `process` byte-identisch (AC-SUG-5b).
+# V1.11-ENTSCHLACKUNG ENTS-3: --from-suggested is now required (via Guard).
+# OQ-ENTS-2 B: flag without value → implicit default <Target>/suggested.yaml.
+# Precedence CLI > File > Config (ENTS-4). `--params-file` Alias VERWORFEN.
+# exists=True intentionally OMITTED from the option — click would validate
+# the sentinel "__DEFAULT__" string against the filesystem. Manual Guard runs
+# in the callback instead (after target_dir resolution).
 @click.option(
     "--from-suggested",
     "from_suggested",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    is_flag=False,
+    flag_value="__DEFAULT__",
     default=None,
+    type=click.Path(dir_okay=False, path_type=Path),
     help=(
         "Load preset/registration/debayer/pcc from a suggested_parameters "
-        "file (see 'astra suggest --output'). Precedence: CLI flags > file "
-        "> config > preset > default; no auto-discover without this flag."
+        "YAML/JSON file (written by 'astra suggest'). Required since v1.11 — "
+        "run 'astra suggest <TARGET>' first to generate the file "
+        "(default: C:/Astra/<Target>/suggested.yaml). "
+        "If flag given without value, defaults to <Target>/suggested.yaml "
+        "(derived from the TARGET argument). CLI flags win over file values. "
+        "No auto-discover; only TARGET-arg-derived default when flag has no value."
+    ),
+)
+# V1.11-SUBSET (OQ-SUBSET-1): --limit N — smoke-test flag (first N lights per group).
+# OQ-SUBSET-3: N >= 1 (0/negative/non-integer → Error Exit 2).
+# OQ-SUBSET-2: --limit + --resume → Error Exit 2 (incompatible flags).
+# OQ-SUBSET-4: structured logs (discovery.limit_applied per group); no --quiet.
+# Kollision geprueft: 0 bestehende --limit Treffer in codebase (leo, 2026-09-05).
+@click.option(
+    "--limit",
+    "limit",
+    type=int,
+    default=None,
+    help=(
+        "Limit number of light frames per group for quick smoke testing "
+        "(discovery processes all groups, but uses only first N lights per group; "
+        "darks, bias, flats remain complete for proper calibration). "
+        "Default: no limit (process all frames). "
+        "Example: --limit 5 (use first 5 lights per group; output marked as smoke_mode=true). "
+        "Combination: incompatible with --resume (use --limit for fresh runs only). "
+        "[English §17]"
     ),
 )
 @click.pass_context
@@ -593,7 +607,7 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
             merge_filter, cfa_drizzle, drizzle_scale, drizzle_pixfrac, drizzle_kernel,
             cfa_drizzle_quality_gate, cfa_drizzle_min_frames, cfa_drizzle_fallback,
             cfa_drizzle_star_count_min, cfa_drizzle_snr_min, cfa_drizzle_correlation_min,
-            cfa_drizzle_fwhm_range, pcc, from_suggested):
+            cfa_drizzle_fwhm_range, pcc, from_suggested, limit):
     """Process a single target directory.
 
     Hinweis (Docs regen 2026-08-11, B3): --config/-c ist eine GLOBALE
@@ -606,43 +620,94 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
     # T2: Precedence CLI > Config. None = Flag nicht gesetzt → Config-Wert.
     effective_no_calib = no_calib if no_calib is not None else cfg.no_calib
 
-    # V19-1.10-TARGET-ADVISOR SUG-5: --from-suggested (CLI > File > Config >
-    # Preset > Default). `from_suggested is None` -> byte-identisch (kein
-    # Auto-Discover, AC-SUG-5b) — dieser Block tut in diesem Fall NICHTS.
-    # CLI-Werte gewinnen IMMER: nur wenn preset/registration_method/
-    # max_rotation/debayer_method/pcc noch None sind, injiziert die Datei
-    # ihren Wert (in-memory, kein Write-back, analog V19-PCC-FLAG deepcopy).
-    if from_suggested is not None:
-        suggested_data = suggest_core.load_suggested_file(from_suggested)
-        suggested_registration = suggested_data.get("registration") or {}
-        suggested_debayer = suggested_data.get("debayer") or {}
-        suggested_pcc = suggested_data.get("pcc") or {}
-        if preset is None and suggested_data.get("preset"):
-            preset = suggested_data.get("preset")
-        if registration_method is None and suggested_registration.get("method"):
-            registration_method = suggested_registration.get("method")
-        if max_rotation is None and suggested_registration.get("max_rotation_deg") is not None:
-            try:
-                max_rotation = float(suggested_registration["max_rotation_deg"])
-            except (TypeError, ValueError):
-                pass
-        if debayer_method is None and suggested_debayer.get("method"):
-            debayer_method = suggested_debayer.get("method")
-        if pcc is None and suggested_pcc.get("enabled") is not None:
-            pcc = bool(suggested_pcc.get("enabled"))
-        logger.info(
-            "process.from_suggested",
-            path=str(from_suggested),
-            preset=suggested_data.get("preset"),
-            method=suggested_registration.get("method"),
-            source=suggested_data.get("source"),
-        )
-
     logger.info("cli.process.start", target=str(target_path), preset=preset)
 
-    # Resolve target directory
+    # Resolve target directory (needed before --from-suggested Guard)
     target_dir = target_path.resolve()
     target_name = target_dir.name
+
+    # V1.11-SUBSET (OQ-SUBSET-3): --limit Validierung N >= 1.
+    # Integer-Typ ist durch click garantiert; 0/negativ → Error Exit 2.
+    if limit is not None and limit < 1:
+        raise click.UsageError(
+            f"process.limit.invalid: --limit must be >= 1 (got {limit}) "
+            f"-- use --limit N with N >= 1, or omit --limit to process all frames"
+        )
+
+    # V1.11-SUBSET (OQ-SUBSET-2): --limit + --resume Inkompatibilität → Error Exit 2.
+    # Resume restores prior run state; --limit would be inconsistent with that state.
+    if limit is not None and resume:
+        raise click.UsageError(
+            "process.limit.resume_incompatible: --limit not compatible with --resume "
+            "-- use --limit for fresh runs only"
+        )
+
+    # V1.11-ENTSCHLACKUNG ENTS-3: --from-suggested Guard (Pflicht).
+    # OQ-ENTS-2 B: flag without value → sentinel "__DEFAULT__" →
+    # implicit default <Target>/suggested.yaml via default_output_path.
+    # Guard order: missing → Error; __DEFAULT__ → resolve; not exists → Error.
+    # CLI-Werte gewinnen IMMER (ENTS-4, CLI > File > Config).
+    if from_suggested is None:
+        raise click.UsageError(
+            f"process.from_suggested.missing: --from-suggested <file> is required "
+            f"\u2014 run 'astra suggest {target_name}' first "
+            f"(default: C:/Astra/{target_name}/suggested.yaml)"
+        )
+    if str(from_suggested) == "__DEFAULT__":
+        from_suggested = suggest_core.default_output_path(
+            target_name, data_root=target_dir.parent
+        )
+    if not Path(from_suggested).exists():
+        raise click.UsageError(
+            f"process.from_suggested.not_found: {from_suggested} not found "
+            f"\u2014 run 'astra suggest {target_name}' first"
+        )
+
+    # Load suggested file and inject values (CLI wins over file, OQ-ENTS-3 A:
+    # null file-field → Config supplements).
+    suggested_data = suggest_core.load_suggested_file(from_suggested)
+    suggested_registration = suggested_data.get("registration") or {}
+    suggested_debayer = suggested_data.get("debayer") or {}
+    suggested_pcc = suggested_data.get("pcc") or {}
+    if preset is None and suggested_data.get("preset"):
+        preset = suggested_data.get("preset")
+    if registration_method is None and suggested_registration.get("method"):
+        registration_method = suggested_registration.get("method")
+    if max_rotation is None and suggested_registration.get("max_rotation_deg") is not None:
+        try:
+            max_rotation = float(suggested_registration["max_rotation_deg"])
+        except (TypeError, ValueError):
+            pass
+    if debayer_method is None and suggested_debayer.get("method"):
+        debayer_method = suggested_debayer.get("method")
+    if pcc is None and suggested_pcc.get("enabled") is not None:
+        pcc = bool(suggested_pcc.get("enabled"))
+    logger.info(
+        "process.from_suggested",
+        path=str(from_suggested),
+        preset=suggested_data.get("preset"),
+        method=suggested_registration.get("method"),
+        source=suggested_data.get("source"),
+    )
+
+    # ENTS-4/6: Preset Guard — must come from file (or CLI override).
+    # No cfg.default_preset fallback without file (gestrafft).
+    if preset is None:
+        raise click.UsageError(
+            f"process.preset.missing: preset missing in suggested file "
+            f"\u2014 run 'astra suggest {target_name}' first"
+        )
+
+    # ENTS-4: Registration Guard — CLI > File > Config (OQ-ENTS-3 A: null → Config).
+    if registration_method is None:
+        if cfg.registration and cfg.registration.method:
+            registration_method = cfg.registration.method
+        else:
+            raise click.UsageError(
+                f"process.registration_method.missing: registration.method missing "
+                f"in suggested file and config "
+                f"\u2014 run 'astra suggest {target_name}' first"
+            )
 
     # CLI-C --preflight: nur Checks, kein Pipeline-Start (ausser --yes bei OK)
     if preflight:
@@ -657,10 +722,7 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
             click.echo("[WARNING] Pre-Flight Warnungen — starte trotzdem (--yes)", err=True)
         # bei OK oder Warning + --yes: faellt durch zur Pipeline
 
-    # Determine preset
-    if not preset:
-        # Try to infer from target name
-        preset = cfg.default_preset
+    # Determine preset (guaranteed non-None at this point, ENTS-4/6)
     pipeline = cfg.get_preset(preset)
     if not pipeline:
         raise click.ClickException(f"Preset '{preset}' not found")
@@ -671,6 +733,7 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
     # `pipeline.processing_params.registration` liest.
     # RE-F (AC-RE-F3): --no-zero-shift-fallback (is_flag) wird in den
     # cli-Wert False uebersetzt; nicht gesetzt -> None (kein Override).
+    # registration_method is guaranteed non-None here (ENTS-4 guard above).
     effective_registration = resolve_registration(
         cfg, pipeline, registration_method, cli_max_rotation=max_rotation,
         cli_zero_shift_threshold=zero_shift_threshold,
@@ -688,10 +751,17 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
         zero_shift_fallback=effective_registration.zero_shift_fallback,
     )
 
-    # V1.8-0 (MALVAR): Debayer-Methode aufloesen.
-    # Precedence: CLI > Config > Default "superpixel".
+    # V1.11-ENTSCHLACKUNG ENTS-4: Debayer-Methode aufloesen.
+    # Precedence: CLI > File > Config (OQ-ENTS-3 A: null → Config).
+    # No "superpixel" hardcode fallback (ENTS-4).
     import warnings
-    effective_debayer_method = debayer_method or cfg.debayer_method or "superpixel"
+    effective_debayer_method = debayer_method or cfg.debayer_method
+    if effective_debayer_method is None:
+        raise click.UsageError(
+            f"process.debayer_method.missing: debayer.method missing in "
+            f"suggested file and config "
+            f"\u2014 run 'astra suggest {target_name}' first"
+        )
     pipeline.processing_params.debayer_method = effective_debayer_method
     # V1.8-0 (MALVAR): bilinear deprecated (Grace v1.8)
     if effective_debayer_method == "bilinear":
@@ -876,8 +946,8 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
             if "enabled" in getattr(cfg.pcc, "model_fields_set", set()) or cfg.pcc.enabled is not None:
                 pcc_enabled = bool(cfg.pcc.enabled)
         if pcc_enabled is not None:
-            # Finde aktiven Preset
-            effective_preset_name = preset or cfg.default_preset
+            # Finde aktiven Preset (preset guaranteed non-None at this point, ENTS-4/6)
+            effective_preset_name = preset
             for _preset in cfg.pipeline_presets:
                 if _preset.name == effective_preset_name:
                     # Batch safe: deepcopy, nicht Config Objekt mutieren
@@ -954,6 +1024,58 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
         context = discovery_result.context
         logger.info("phase.discovery.complete", lights=context.total_light_frames, darks=context.calibration.dark_count)
 
+        # V1.11-SUBSET (SUBSET-1/SUBSET-6): --limit N — Lights pro Gruppe kuerzen.
+        # Integration-Punkt: nach build_observation_context() (via discovery_agent.run),
+        # VOR Calibration — Darks/Bias/Flats bleiben unangetastet (AC-SUBSET-2).
+        # natural sort ist bereits durch FrameSet.group_by_params() garantiert
+        # (Frames werden in der Reihenfolge des FITS-Scans erfasst, Dateiname
+        # alphabetisch/natural sorted durch stage_input). Hier: Top-N Slice.
+        # Platzierung in cli.py (nicht discovery.py): der limit-Parameter ist ein
+        # CLI-Concern (OQ-SUBSET-4); discovery.py bleibt seiteneffektfrei/testbar.
+        if limit is not None:
+            from astro_process.models.core import FrameType
+            lights_frameset = context.frames.get(FrameType.LIGHT)
+            if lights_frameset is not None:
+                # Zaehle Gesamt-Lights VOR der Kuerzu (fuer Marker in Archive).
+                _frames_total = len(lights_frameset.frames)
+                # Gruppiere nach (EXPTIME, GAIN, FILTER) — analog discover_groups().
+                # Jede Gruppe wird auf erste N Frames beschraenkt (natural sort).
+                groups_by_params = lights_frameset.group_by_params()
+                new_frames: list = []
+                for _gkey, _gset in groups_by_params.items():
+                    _original = len(_gset.frames)
+                    _selected_frames = _gset.frames[:limit]
+                    _selected = len(_selected_frames)
+                    # Gruppen-Name analog compute_group_hash (Lesbarkeit im Log)
+                    _exptime, _gain, _filter = _gkey
+                    from astro_process.models.core import compute_group_hash as _cgh
+                    _group_name = _cgh(float(_exptime), int(_gain), str(_filter))
+                    logger.info(
+                        "discovery.limit_applied",
+                        group=_group_name,
+                        original=_original,
+                        selected=_selected,
+                        limit=limit,
+                    )
+                    new_frames.extend(_selected_frames)
+                lights_frameset.frames = new_frames
+                # Metadaten fuer Archive-Phase (AC-SUBSET-3): am context speichern.
+                # smoke_mode / limit / frames_total werden an archive_agent
+                # als separate kwargs uebergeben (kein Context-Schema-Bruch).
+                _smoke_frames_total = _frames_total
+            else:
+                _smoke_frames_total = 0
+            _smoke_mode = True
+            logger.info(
+                "cli.process.limit_active",
+                limit=limit,
+                frames_total_before_limit=_smoke_frames_total,
+                smoke_mode=True,
+            )
+        else:
+            _smoke_mode = False
+            _smoke_frames_total = None
+
         # V1.5-11 (W2) / V1.6-7: --az-mode/--eq-mode CLI-Override.
         # Precedence CLI > EQMODE-Header. Wenn gesetzt, ueberschreibt
         # den eq-Flag im DiscoveryResult (fuer archiv/agent-log) und wird
@@ -998,75 +1120,14 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
             debayer_method=effective_debayer_method,
         )
 
-        # V19-REG-SMART E3: Priority Chain recompute after Discovery (header available)
-        # Resolve registration via new 5-param resolver (CLI > Profil > Auto-Detect > Config > fft hardcode)
+        # V1.11-ENTSCHLACKUNG ENTS-6: E3 Smart-Default entfernt — registration_method
+        # kommt garantiert aus File/CLI (Guard oben), kein Auto-Detect-Recompute noetig.
+        # Persist effective registration_method for downstream multi-group resolver
+        # (multi_group_agent.py liest _registration_cli_override).
         try:
-            from .config.loader import (  # type: ignore
-                _detect_equipment_from_header,
-                resolve_registration_config,
-            )
-            from .core.equipment import detect_mount_type as _dt_for_e3  # type: ignore
-            _e3_header = None
-            _e3_exptimes: list[float] = []
-            try:
-                _lights_e3 = context.get_lights().frames if context else []
-                if _lights_e3 and _lights_e3[0].header is not None:
-                    _raw_e3 = getattr(_lights_e3[0].header, "raw_cards", None)
-                    _e3_header = _raw_e3 if _raw_e3 is not None else _lights_e3[0].header
-                    # Also handle header as object with get method; raw_cards is dict-like
-                    if not hasattr(_e3_header, "get") and isinstance(_e3_header, dict):
-                        pass
-                for _f in _lights_e3:
-                    try:
-                        if _f.header is not None and getattr(_f.header, "exptime", None) is not None:
-                            _e3_exptimes.append(float(_f.header.exptime))  # type: ignore
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-            _e3_equipment = {}
-            try:
-                _e3_equipment = _detect_equipment_from_header(_e3_header, cfg) or {}
-            except Exception:
-                _e3_equipment = {}
-            # Also inject mount_type via detect_mount_type for logging (Spec cli.py:531)
-            _e3_mount = "eq"
-            try:
-                if _e3_header is not None:
-                    _e3_mount = _dt_for_e3(_e3_header)
-                elif _e3_equipment.get("mount_type"):
-                    _e3_mount = str(_e3_equipment.get("mount_type"))
-            except Exception:
-                pass
-            _e3_result = resolve_registration_config(
-                cfg=cfg,
-                equipment=_e3_equipment if _e3_equipment else None,
-                header=_e3_header,
-                exptimes=_e3_exptimes if _e3_exptimes else None,
-                cli_method=registration_method,
-            )
-            # Apply smart default if CLI not set and result differs (equipment/auto wins over config default)
-            if registration_method is None and _e3_result.get("method") != effective_registration.method:
-                old_m = effective_registration.method
-                _apply_resolver_result(effective_registration, _e3_result)
-                pipeline.processing_params.registration = effective_registration
-                logger.info(
-                    "registration.smart_default_applied",
-                    old_method=old_m,
-                    new_method=effective_registration.method,
-                    mount_type=_e3_mount,
-                    max_exptime=max(_e3_exptimes) if _e3_exptimes else 0,
-                    source="equipment" if _e3_equipment else "auto_detect",
-                )
-            # Persist CLI override for downstream multi-group per-group resolver
-            try:
-                cfg._registration_cli_override = registration_method  # type: ignore[attr-defined]
-            except Exception:
-                pass
-            # Also log mount_type injection (Spec cli.py:531)
-            logger.info("registration.mount_type_injected", mount_type=_e3_mount, equipment=_e3_equipment.get("name") if _e3_equipment else None)
-        except Exception as _e3_exc:
-            logger.warning("registration.smart_default_failed", error=str(_e3_exc))
+            cfg._registration_cli_override = registration_method  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
         # V19-REG-SMART E4: Pre-Check Warning fft auf AZ mit langer Belichtung (>=45s)
         try:
@@ -1421,6 +1482,10 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
             discovery_result=discovery_result,
             keep_working=keep_working,
             multi_group_metadata=proc_result.multi_group_metadata if hasattr(proc_result, 'multi_group_metadata') else None,
+            # V1.11-SUBSET (AC-SUBSET-3): Smoke-Mode Marker fuer run-info.json + agent-log.yaml.
+            smoke_mode=_smoke_mode,
+            smoke_limit=limit,
+            smoke_frames_total=_smoke_frames_total,
         )
         logger.info("phase.archive.complete", output=str(archive_result.output_dir))
 
@@ -1476,13 +1541,12 @@ def process(ctx, target_path, preset, output, dry_run, keep_working, keep_groups
 @click.option(
     "--output",
     "output_path",
-    is_flag=False,
-    flag_value="__DEFAULT__",
     default=None,
     type=click.Path(path_type=Path),
     help=(
-        "Write suggested_parameters as YAML (default) or JSON (.json "
-        "suffix). Without a path, defaults to "
+        "Override the output path for the suggested_parameters file "
+        "(YAML default, JSON on .json suffix). "
+        "Without --output the file is always written to "
         "C:/Astra/<Target>/suggested.yaml (Target-Root, next to Lights). "
         "Always overwrites (no auto-history)."
     ),
@@ -1500,18 +1564,18 @@ def suggest(ctx, target, header_path, coords, output_path, as_json):
     Offline-first advisor (Header > target-cache > SIMBAD > Handbook 22):
     the local target-cache always wins; SIMBAD is only queried on a cache
     miss and only if the network is reachable (5s timeout, 1 query). On
-    failure it degrades to a generic 2-option fallback with a warning —
-    never a crash, always Exit 0 (see suggest.simbad_unavailable).
+    cache miss + SIMBAD unreachable for an unknown target: Error Exit 2
+    (suggest.simbad_unavailable); add the entry in stella target-cache.md.
 
-    This command is an ADVISOR, not a decider: it never runs `process` by
-    itself and `process` never reads its output unless you pass the
-    explicit `--from-suggested <file>` flag.
+    Always writes suggested.yaml to <data_root>/<Target>/suggested.yaml
+    (Target-Root) unless --output overrides the path. 'astra process'
+    requires --from-suggested (run 'astra suggest <TARGET>' first).
 
     Examples:
         astra suggest M31
+        astra suggest M31 --output C:/Astra/M31/suggested_20260905.yaml
         astra suggest M27 --header C:/Astra/M27/light_0001.fits
         astra suggest C19 --json --output C:/Astra/C19/suggested.yaml
-        astra suggest M31 --output
     """
     cfg: AppConfig = ctx.obj["config"]
     suggest_cfg = getattr(cfg, "suggest", None)
@@ -1534,23 +1598,35 @@ def suggest(ctx, target, header_path, coords, output_path, as_json):
             cache_path=cache_path,
         )
     except suggest_core.SuggestInputError as e:
-        raise click.ClickException(str(e)) from e
+        raise click.UsageError(str(e)) from e
 
     data = suggest_core.to_json_dict(result)
 
-    if output_path is not None:
-        resolved_output = (
-            suggest_core.default_output_path(result.target, data_root=cfg.data_root)
-            if str(output_path) == "__DEFAULT__"
-            else Path(output_path)
+    # ENTS-1: always write suggested.yaml — --output is a pure path override.
+    # Default: <data_root>/<Target>/suggested.yaml (Target-Root).
+    resolved_output = (
+        Path(output_path) if output_path is not None
+        else suggest_core.default_output_path(result.target, data_root=cfg.data_root)
+    )
+    # DEF-012 Ghost-Ordner-Guard (Boris-Go): vor mkdir/default_output_path prüfen —
+    # suggest "M31" -> Error + Hint, kein mkdir C:\Astra\M31\.
+    # write_suggested_file hat eigenen Guard; hier zusätzlich explizit für Exit 2.
+    target_dir = resolved_output.parent
+    if not target_dir.is_dir() or not (target_dir / "lights").is_dir():
+        raise click.UsageError(
+            f"Target-Ordner fehlt: {target_dir} \u2014 nutze exakten Ordnernamen aus C:\\Astra "
+            f"(z.B. 'M31 Andromeda'), kein mkdir f\u00fcr neue Targets."
         )
+    try:
         suggest_core.write_suggested_file(suggest_core.to_file_dict(result), resolved_output)
-        logger.info(
-            "suggest.wrote_suggested",
-            path=str(resolved_output),
-            preset=data["preset"],
-            method=data["registration"]["method"],
-        )
+    except suggest_core.SuggestInputError as e:
+        raise click.UsageError(str(e)) from e
+    logger.info(
+        "suggest.wrote_suggested",
+        path=str(resolved_output),
+        preset=data["preset"],
+        method=data["registration"]["method"],
+    )
 
     if as_json:
         # Single-line JSON (kein indent): structlog schreibt vorangehende
@@ -1563,19 +1639,53 @@ def suggest(ctx, target, header_path, coords, output_path, as_json):
 
 @cli.command()
 @click.argument("data_root", type=click.Path(exists=True, path_type=Path))
-@click.option("--preset", "-p", default="star_standard", help="Default preset for all targets")
+@click.option("--preset", "-p", default=None, help="Preset override for all targets (default: from per-target suggested.yaml)")
 @click.option("--dry-run", is_flag=True)
+# V1.11-SUBSET (SUBSET-3): --limit propagation for batch (uniform, per-group, per-target).
+@click.option(
+    "--limit",
+    "limit",
+    type=int,
+    default=None,
+    help=(
+        "Limit number of light frames per group for smoke testing - applied uniformly "
+        "to every target in the batch (N >= 1). See 'astra process --help' for details."
+    ),
+)
 @click.pass_context
-def batch(ctx, data_root, preset, dry_run):
-    """Process all subdirectories in data root."""
+def batch(ctx, data_root, preset, dry_run, limit):
+    """Process all subdirectories in data root.
+
+    Each target directory must have a suggested.yaml (run 'astra suggest
+    <TARGET>' first). The per-target suggested.yaml is passed via
+    --from-suggested (Target-Root default). Missing file -> Error (ENTS-1).
+    """
     cfg: AppConfig = ctx.obj["config"]
+
+    # V1.11-SUBSET (OQ-SUBSET-3): Validate --limit N >= 1 in batch context.
+    if limit is not None and limit < 1:
+        raise click.UsageError(
+            f"batch.limit.invalid: --limit must be >= 1 (got {limit}) "
+            f"-- use --limit N with N >= 1, or omit --limit to process all frames"
+        )
 
     targets = [d for d in Path(data_root).iterdir() if d.is_dir()]
     click.echo(f"Found {len(targets)} targets")
 
     for target in targets:
         click.echo(f"\n--- Processing {target.name} ---")
-        ctx.invoke(process, target_path=target, preset=preset, dry_run=dry_run)
+        # ENTS-3: pass per-target suggested.yaml (Target-Root default).
+        # Missing file -> canonical not_found Error (OQ-ENTS-1 A, strikt).
+        target_suggested = str(target / "suggested.yaml")
+        ctx.invoke(
+            process,
+            target_path=target,
+            preset=preset,
+            dry_run=dry_run,
+            from_suggested=Path(target_suggested),
+            # V1.11-SUBSET (SUBSET-3): propagate --limit uniform to each target.
+            limit=limit,
+        )
 
 
 @cli.command()

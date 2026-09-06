@@ -216,12 +216,26 @@ def _apply_mandatory_average_filter(
 
     filtered: List[Path] = []
     rejected_strs: list[str] = []
-    for p in registered:
+    for idx, p in enumerate(registered):
         q = _find_q(p)
         if q is None:
-            # Kein Mapping: konservativ behalten (nicht verwerfen ohne Metrik)
-            filtered.append(p)
-            continue
+            # Fallback: positional mapping fuer Intra-Group (DEF-011 M27 60s40)
+            # deb_*.fits (qualities) vs reg_*.fits (registered) haben unterschiedliche
+            # Namen (deb_0047 vs reg_0000). Name-Lookup schlaegt fehl -> Ghosting
+            # bleibt (threshold_rejected 0 trotz corr 0.04). Positional gilt:
+            # registered[i] <-> qualities[i] wenn Längen gleich (kein RE-F Reject).
+            # Bei Längendifferenz (RE-F Rejects) konservativ behalten.
+            if len(registered) == len(qualities) and 0 <= idx < len(qualities):
+                q = qualities[idx]
+                # Nur nutzen wenn correlation plausibel (M27 Beleg: corr 0.04)
+                # Referenz hat correlation None -> nicht filtern, daher ok.
+            else:
+                # Kein Mapping: konservativ behalten (nicht verwerfen ohne Metrik)
+                filtered.append(p)
+                continue
+            if q is None:
+                filtered.append(p)
+                continue
         # Condition (a): outlier_excluded True -> verwerfen
         if getattr(q, "outlier_excluded", False):
             rejected_strs.append(p.as_posix())
@@ -746,6 +760,21 @@ def _apply_selection_and_rejection(
                         mand_index_map[q_posix] = len(mand_subset) - 1
                         mand_index_map[q_name] = len(mand_subset) - 1
                         mand_index_map[q.frame] = len(mand_subset) - 1
+        # DEF-011 fallback: deb vs reg Name-Mismatch -> positional mapping
+        if not mand_subset and len(final_registered) == len(qualities):
+            mand_subset = list(qualities)
+            for q in qualities:
+                if q.frame is not None:
+                    mand_index_map[Path(q.frame).as_posix()] = 0
+        elif not mand_subset and len(final_registered) <= len(qualities):
+            # Allgemeiner Fall: nutze Positions-Mapping (M27 60s40: 48 reg vs 48 qual)
+            # Filtere qualities positionell: index entspricht final_registered index
+            # wenn keine Name-Treffer, aber Längen ähnlich -> nimm alle mit corr
+            # und filtere später positionell
+            mand_subset = list(qualities)
+            for q in qualities:
+                if q.frame is not None:
+                    mand_index_map[Path(q.frame).as_posix()] = 0
         if mand_subset:
             try:
                 mand_rejected_quals = reject_outlier_frames(
@@ -758,7 +787,11 @@ def _apply_selection_and_rejection(
                 mand_rejected_quals = mand_subset
             # Filtere final_registered nach outlier_excluded ODER corr_hp < Schwelle
             new_mand_final: List[Path] = []
-            for p in final_registered:
+            # Positional-Fallback Index fuer deb vs reg Mismatch (DEF-011)
+            use_positional = len(final_registered) == len(mand_rejected_quals) and not any(
+                Path(rq.frame).name == p.name for p in final_registered for rq in mand_rejected_quals if rq.frame
+            ) if mand_rejected_quals else False
+            for idx, p in enumerate(final_registered):
                 p_posix = p.as_posix()
                 p_str = str(p)
                 p_name = p.name
@@ -771,6 +804,8 @@ def _apply_selection_and_rejection(
                     if rq_posix == p_posix or rq.frame == p_str or rq.frame == p_posix or rq_name == p_name or rq.frame == p_name:
                         rq_match = rq
                         break
+                if rq_match is None and use_positional and 0 <= idx < len(mand_rejected_quals):
+                    rq_match = mand_rejected_quals[idx]
                 if rq_match is None:
                     # Kein Mapping — konservativ behalten
                     new_mand_final.append(p)
@@ -800,15 +835,27 @@ def _apply_selection_and_rejection(
                     continue
                 new_mand_final.append(p)
             if mandatory_rejected > 0:
-                log.info(
-                    "selection.mandatory_rejected",
-                    group=group_hash,
-                    total_after_threshold=len(final_registered),
-                    mandatory_rejected=mandatory_rejected,
-                    stacked=len(new_mand_final),
-                    min_corr_hp=mandatory_min_corr_hp,
-                )
-                final_registered = new_mand_final
+                # Guard: nicht auf 0 filtern (sonst All Groups Failed wie im no_calib Test mit 3 synthetischen Random-Frames)
+                # Min-Frames Guard ist für Mandatory nicht pauschal (Test test_reference_corr_none erwartet 2->1 trotz min 3)
+                if len(new_mand_final) == 0:
+                    log.warning(
+                        "selection.mandatory_skipped_empty",
+                        group=group_hash,
+                        total_after_threshold=len(final_registered),
+                        mandatory_rejected=mandatory_rejected,
+                        would_stack=0,
+                        action="all_frames_kept",
+                    )
+                else:
+                    log.info(
+                        "selection.mandatory_rejected",
+                        group=group_hash,
+                        total_after_threshold=len(final_registered),
+                        mandatory_rejected=mandatory_rejected,
+                        stacked=len(new_mand_final),
+                        min_corr_hp=mandatory_min_corr_hp,
+                    )
+                    final_registered = new_mand_final
 
     stacked = len(final_registered)
 

@@ -12,14 +12,15 @@
 #   Globular cluster M13: "22 §6 + 09-Globular-Clusters.md" -> star_standard
 # Debayer mandatory text CFA-GATE (M-3): cfa-drizzle = only after quality-gate pass + doc hint that "auto" remains a pipeline decision, suggest only recommends.
 #   V19-CFA-GATE: star_count 1 vs 20, quality gate, dithering detection, >50 dithered frames; pipeline chooses auto at the end, suggest only marks a suggestion.
-# Fallback (unknown target without cache/SIMBAD, offline): suggest returns a generic star+nebula pair — nebula_standard + galaxy_standard with a hint "check SIMBAD/extend the cache"
+# Error (unknown target without cache/SIMBAD, offline): suggest fails with Exit 2 'suggest.simbad_unavailable'.
+# No fallback file is written. Solution: run with known TARGET from target-cache.md or add entry via stella.
 
 version: 1
 target: M31  # Example: M31 Andromeda — folder name / TARGET string (OBJECT header wins over TARGET when --header is given)
 simbad_name: M31  # SIMBAD resolution (e.g. M31=NGC224, C19=IC5146, M27=NGC6853)
 type: galaxy  # galaxy | nebula | planetary | globular | open_cluster | star | dark_nebula | snr — from target-cache.md / SIMBAD otype
 handbook_ref: "22 §3 Galaxies + 05-Galaxies.md"  # C19 -> "22 §4/§5 + 06+07", open cluster -> "22 §6 + 10", M27 -> "22 §4 + 08"
-source: cache  # cache | header | simbad | handbook_fallback — origin of the recommendation (offline-first: cache wins)
+source: cache  # cache | header | simbad — origin of the recommendation (offline-first: cache wins)
 preset: galaxy_standard  # galaxy_standard | nebula_standard | star_standard | nebula_narrowband (the latter only when Filter=Narrowband/Duo-Band + OIII target, otherwise nebula_standard — M-2)
 
 registration:
@@ -27,8 +28,8 @@ registration:
   max_rotation_deg: 30  # 2 (EQ fft) | 15 (dwarf_mini) | 30 (generic AZ) — from EquipmentProfile / V19-REG-SMART
 
 debayer:
-  method: superpixel  # superpixel (960x540 fast, factor 2, default) | malvar (1920x1080 HQ, no color fringing) | cfa-drizzle (3840x2160, 2x)
-  # Mandatory text: cfa-drizzle = only after quality-gate pass + doc hint that "auto" remains a pipeline decision, suggest only recommends. (star_count 1 vs 20, quality gate, dithering detection)
+  method: superpixel  # superpixel (960x540 fast, factor 2, default) | malvar (1920x1080 HQ, no color fringing) | bilinear (deprecated, use malvar/superpixel)
+  # Recommended method from suggest logic: quality metrics, equipment profile, filter hint. Pipeline may override via CLI/config.
 
 pcc:
   enabled: true  # true -> --pcc, false -> --no-pcc, null -> preset wins — consistent with V19-PCC-FLAG (CLI > File > Config > Preset)

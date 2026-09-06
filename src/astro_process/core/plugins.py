@@ -136,10 +136,20 @@ class PluginRegistry:
         self._plugins[plugin.name] = plugin
 
     def _ensure_loaded(self) -> None:
-        """Laedt Entry-Points einmalig (lazy, nur bei Bedarf). Fehler -> Warning."""
+        """Laedt Builtin-Plugins + Entry-Points einmalig (lazy). Fehler -> Warning.
+
+        Reihenfolge (AC-PL-A2, DEF-013):
+        1. ``_register_builtin_plugins`` — direkt registrierte Produktiv-Plugins
+           (structure_enhancement); lazy Import vermeidet zirkulaere Abhaengigkeit.
+        2. Entry-Points der Gruppe ``astra.plugins`` — werden nach den Builtins
+           registriert; Duplikate (gleicher Name) -> erste gewinnt + Warning.
+        """
         if self._loaded:
             return
         self._loaded = True
+        # Schritt 1: Builtin-Plugins (lazy, DEF-013 Zirkular-Import-Fix)
+        _register_builtin_plugins(self)
+        # Schritt 2: Entry-Points (Duplikate nach Builtins werden verworfen)
         try:
             entry_points = importlib.metadata.entry_points(
                 group=PLUGIN_ENTRY_POINT_GROUP
@@ -206,6 +216,37 @@ class PluginRegistry:
         return None
 
 
+def _register_builtin_plugins(registry: "PluginRegistry") -> None:
+    """Registriert Produktiv-Plugins direkt in der Registry (AC-PL-A3, DEF-013).
+
+    LAZY-Variante: wird erst beim ERSTEN ``resolve_step``-/``plugins``-Zugriff
+    aufgerufen (via ``_ensure_loaded``), NICHT beim Modul-Import — vermeidet
+    den zirkularen Import (``structure_enhancement`` importiert ``core.plugins``
+    zurueck; ein Top-Level-Import von ``structure_enhancement`` wuerde den
+    Modul-Init von ``core.plugins`` unterbrechen).
+
+    Das StructureEnhancementPlugin wird VOR Entry-Points registriert und
+    gewinnt damit bei Duplikaten (AC-PL-A2: erste Registrierung gewinnt).
+    Fehler werden als ``plugins.builtin_registration_failed``-Warning
+    geloggt — kein Abbruch (E1).
+    """
+    try:
+        # Lokaler Import hier (nicht Top-Level) — bricht den zirkularen
+        # Import-Pfad (core.plugins -> plugins.structure_enhancement ->
+        # core.plugins). Bei diesem Aufruf ist core.plugins vollstaendig
+        # initialisiert, daher kein Zirkel mehr.
+        from astro_process.plugins.structure_enhancement import (  # noqa: PLC0415
+            StructureEnhancementPlugin,
+        )
+        registry.register(StructureEnhancementPlugin())
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "plugins.builtin_registration_failed",
+            name="structure_enhancement",
+            error=str(e),
+        )
+
+
 _default_registry = PluginRegistry()
 
 
@@ -215,6 +256,9 @@ def default_registry() -> PluginRegistry:
     Injizierte Test-Plugins werden hier registriert (AC-PL-A3) — dadurch
     erscheinen sie auch in ``astra plugin list`` (AC-PL-C2) ohne echte
     Installation.
+
+    Builtin-Plugins (structure_enhancement) werden lazy beim ersten Zugriff
+    registriert (DEF-013: lazy Import vermeidet zirkulaere Abhaengigkeit).
     """
     return _default_registry
 

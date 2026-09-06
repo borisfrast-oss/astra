@@ -970,16 +970,15 @@ Purpose: Help users choose the right preset and registration method without read
 ```bash
 astra suggest <TARGET>                                      # Interactive — suggests 1–2 options
 astra suggest M31 --header /path/to/light_001.fits         # Read filter/exposure from FITS header
-astra suggest M27 --output C:/Astra/M27/suggested.yaml     # Write parameters to file
-astra suggest C19 --json                                   # Machine-readable output (JSON)
-astra suggest M31 --output --json                          # Both file and JSON
+astra suggest M27 --output C:/Astra/M27/suggested.yaml     # Write parameters to custom file path
+astra suggest C19 --json                                   # Machine-readable output (JSON); YAML file still written to default location
 ```
 
 **Data sources (priority, offline-first):**
 
 1. **FITS Header (highest priority, local):** `OBJECT`, `FILTER`, `TELESCOP`, `EXPTIME` read via `astropy.io.fits.getheader`. Allows suggest to detect dwarf mount type (az/eq) and filter characteristics (broadband/dual-band/narrowband).
 2. **Target-Cache (stella-maintained):** ~30+ known objects in `knowledge-base/agents/stella/target-cache.md` with preset, handbook reference, and type (galaxy/nebula/planetary/globular/star/etc.). Offline cache eliminates SIMBAD lookup for common targets.
-3. **SIMBAD webfetch (cache-miss only):** When target not in cache and internet available, suggest queries SIMBAD to determine object type. Offline or rate-limited? Returns cache-only advice and a warning (`WARN suggest.simbad_unavailable`), then exits 0.
+3. **SIMBAD webfetch (cache-miss only):** When target not in cache and internet available, suggest queries SIMBAD to determine object type. Offline or rate-limited (cache miss + unreachable)? Error Exit 2 `suggest.simbad_unavailable` — no file written; solution: add entry to target-cache.md or run with known target.
 4. **Handbook (SSOT, no hard-coded tree):** Suggest output cites Handbook chapters (§3 Galaxies / §4 Emission Nebula / §6 Star Clusters / §14 Stack Decision) as reasoning, not as code logic.
 
 **Example output (stdout, human-readable):**
@@ -991,13 +990,13 @@ Source: cache hit (knowledge-base/agents/stella/target-cache.md) — SIMBAD not 
 
 1) galaxy_standard + astroalign 30° (AZ, dwarf_mini)  [RECOMMENDED]
    Why: Handbook 22 §3 Galaxies + target-cache galaxy → galaxy_standard; AZ + 60s → astroalign 15-30° (V19-REG-SMART, fft would ghost); Duo-Band → PCC recommended
-   CLI: astra process "C:/Astra/M31 Andromeda" --preset galaxy_standard --registration-method astroalign --max-rotation 30 --debayer-method superpixel --pcc
+    CLI: astra process "C:/Astra/M31 Andromeda" --from-suggested --preset galaxy_standard --registration-method astroalign --max-rotation 30 --debayer-method superpixel --pcc
    Debayer: superpixel 960×540 fast (default), malvar 1920×1080 HQ alternative (no moiré), cfa-drizzle 3840×2160 if >50 dithered frames
    Darks: run `astra darks check "C:/Astra/M31 Andromeda"` for coverage (V19-DARKS-SYNC)
 
 2) galaxy_standard + fft 2° (EQ fallback)  [if mount was EQ]
    Why: Handbook 22 §3 — EQ + short exposure → fft fast
-   CLI: astra process "C:/Astra/M31 Andromeda" --preset galaxy_standard --registration-method fft --max-rotation 2 --pcc
+    CLI: astra process "C:/Astra/M31 Andromeda" --from-suggested --preset galaxy_standard --registration-method fft --max-rotation 2 --pcc
 
 Refs: Handbook 22-Siril-Workflow-Decision-Tree §3 + Ch. 17, astra/docs/05-presets.md, 07-registration.md
 ```
@@ -1014,7 +1013,7 @@ target: M31
 simbad_name: M31
 type: galaxy                                    # galaxy | nebula | planetary | globular | open_cluster | star | dark_nebula | snr
 handbook_ref: "22 §3 Galaxies + 05-Galaxies.md"  # Chapters cited in suggest output
-source: cache                                   # cache | header | simbad | handbook_fallback — where recommendation came from
+source: cache                                   # cache | header | simbad — where recommendation came from (offline-first: cache wins)
 
 preset: galaxy_standard                         # galaxy_standard | nebula_standard | star_standard | nebula_narrowband
 registration:
@@ -1040,21 +1039,22 @@ exptime_hint: 60                                # from EXPTIME header (seconds)
 Use `--from-suggested` to load parameters from the file written by `suggest`:
 
 ```bash
-astra suggest M31 --output                      # writes C:\Astra\M31\suggested.yaml
-astra process "C:\Astra\M31" --from-suggested "C:\Astra\M31\suggested.yaml"
+astra suggest M31                               # always writes C:\Astra\M31\suggested.yaml (default)
+astra process "C:\Astra\M31" --from-suggested  # bare flag → default path C:\Astra\M31\suggested.yaml (OQ-ENTS-2 B)
+astra process "C:\Astra\M31" --from-suggested "C:\Astra\M31\suggested.yaml"  # explicit path
 ```
 
-**Without the flag, behavior is unchanged** — no file is read, pipeline behaves exactly as in 1.9.x.
+**`--from-suggested` is required since v1.11** — without the flag, process fails with Error Exit 2 `process.from_suggested.missing`. This enforces the mandatory suggest→process workflow and eliminates silent fallbacks.
 
-**Precedence (CLI wins over all, then file, then config/preset):**
+**Precedence (CLI wins over file, then config; File is required):**
 
 ```
 CLI Flag (highest priority)
-  > suggested File (--from-suggested)
-    > Config (config.yaml profile/pcc settings)
-      > Preset (pipeline_presets definition)
-        > Hardcoded Default (fft, superpixel)
+  > suggested File (--from-suggested, required)
+    > Config (config.yaml profile/pcc settings, only if file field is null)
 ```
+
+**Missing values are errors, not silent defaults:** If a required parameter (preset, registration method, debayer method) is missing from CLI, File, and Config, `process` fails with Error Exit 2 (e.g., `process.preset.missing`). File-field `null` allows Config to supplement (OQ-ENTS-3 A); otherwise strict `CLI > File > Config` chain.
 
 **Example with CLI override:**
 
@@ -1065,7 +1065,7 @@ astra process "C:\Astra\M31" --from-suggested "C:\Astra\M31\suggested.yaml" \
 # Result: fft 2° used (CLI wins), other params from file (preset=galaxy_standard, debayer=superpixel, pcc=true)
 ```
 
-**No auto-discover:** Suggested file in the target folder is **never** read automatically. User must explicitly pass `--from-suggested` to load it. This prevents surprise overrides when multiple suggest runs exist.
+**No auto-discover:** Suggested file in the target folder is **never** read automatically. User must explicitly pass `--from-suggested` to load it (or it fails with Error Exit 2 `process.from_suggested.missing`). With the bare flag (`--from-suggested` without value), the TARGET-arg-derived default `<Target>/suggested.yaml` is used; if missing → Error Exit 2 `process.from_suggested.not_found`. This prevents silent mismatches when multiple suggest runs exist.
 
 ### 17.4 Debayer Method Guide
 
@@ -1106,7 +1106,7 @@ suggest:
   target_cache_path: "C:/path/to/target-cache.md"  # optional; if unset, every target is a cache miss
 ```
 
-Without a local cache, every target triggers either a SIMBAD query (if online, 5s timeout) or generic fallback advice with a warning — no crash, always Exit 0 (AC-SUG-4). For development or offline scenarios with a slow/unavailable network, point to your local `target-cache.md` to skip SIMBAD entirely.
+Without a local cache, every target triggers either a SIMBAD query (if online, 5s timeout) or Error Exit 2 `suggest.simbad_unavailable` (unknown target + cache miss + offline) — no file written, no generic fallback (v1.11 ENTS-5). For development or offline scenarios with a slow/unavailable network, point to your local `target-cache.md` to skip SIMBAD entirely or add unknown targets via stella.
 
 ### 17.8 Workflow Summary
 
@@ -1117,7 +1117,7 @@ Without a local cache, every target triggers either a SIMBAD query (if online, 5
 astra inspect "C:\Astra\M31"                    # shows FITS headers
 
 # 2. Get advice
-astra suggest M31 --header "C:\Astra\M31\light_001.fits" --output  # writes suggested.yaml
+astra suggest M31 --header "C:\Astra\M31\light_001.fits"  # reads header, writes C:\Astra\M31\suggested.yaml
 
 # 3. Review recommendations and copy the CLI command from suggest output
 

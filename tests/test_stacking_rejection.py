@@ -34,7 +34,9 @@ from click.testing import CliRunner
 
 # ── Ensure src is on the path ─────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from conftest import write_default_suggested  # noqa: E402
 from astro_process.agents.processing_agent import ProcessingAgent
 from astro_process.core.stacking import (
     resolve_stack_method,
@@ -264,12 +266,14 @@ class TestCliStackingFlag:
 
     def test_cli_preset_rejection_maps_without_flag(self, tmp_path):
         """Kern-Akzeptanz (stella-Diagnose C20): nebula_standard
-        (rejection "winsorized") OHNE Flag -> effektive Methode
+        (rejection "winsorized") OHNE --stacking-method Flag -> effektive Methode
         winsorized (vorher lief der Preset mit purem Average)."""
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target, preset="nebula_standard")
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["process", str(target), "--dry-run", "--preset", "nebula_standard"]
+            cli, ["process", str(target), "--dry-run", "--from-suggested",
+                  "--preset", "nebula_standard"]
         )
         assert result.exit_code == 0, result.output
         assert "cli.process.stacking" in result.output
@@ -280,11 +284,12 @@ class TestCliStackingFlag:
         --stacking-method median -> median gewinnt (CLI > Preset/Mapping);
         rejection bleibt im Log sichtbar (nicht veraendert)."""
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target, preset="nebula_standard")
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["process", str(target), "--dry-run", "--preset", "nebula_standard",
-             "--stacking-method", "median"],
+            ["process", str(target), "--dry-run", "--from-suggested",
+             "--preset", "nebula_standard", "--stacking-method", "median"],
         )
         assert result.exit_code == 0, result.output
         assert "cli.process.stacking" in result.output
@@ -306,11 +311,12 @@ class TestCliStackingFlag:
         cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target)
         runner = CliRunner()
         result = runner.invoke(
             cli,
             ["-c", str(cfg_path), "process", str(target), "--dry-run",
-             "--preset", "star_standard", "--stacking-method", "average"],
+             "--from-suggested", "--preset", "star_standard", "--stacking-method", "average"],
         )
         assert result.exit_code == 0, result.output
         assert "cli.process.stacking" in result.output

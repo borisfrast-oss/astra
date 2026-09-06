@@ -1,11 +1,12 @@
-"""Tests for V19-1.10-TARGET-ADVISOR (`astra suggest` + `process --from-suggested`).
+"""Tests for V1.11-ENTSCHLACKUNG (`astra suggest` immer-Write +
+`process --from-suggested` Pflicht).
 
-Spec: orion/knowledge-base/projects/astra/specs/spec-v19-target-advisor.md
-(owen, decided 2026-09-04) — AC-SUG-1..6.
+Spec: orion/knowledge-base/projects/astra/specs/spec-v1.11-entschlackung.md
+(owen, decided 2026-09-05) — AC-ENTS-1..6.
 Plan: orion/knowledge-base/projects/astra/plan.md Z.532-542 (Test-Strategie).
 
-S10 (Lessons): gezielte Tests je AC-SUG, kein Voll-CI je Schritt — diese
-Datei ist der komplette S10-Test-Umfang fuer V19-1.10-TARGET-ADVISOR.
+S10 (Lessons): gezielte Tests je AC-ENTS, kein Voll-CI je Schritt — diese
+Datei ist der komplette S10-Test-Umfang fuer V1.11-ENTSCHLACKUNG.
 
 Die Tests nutzen einen MOCK-Target-Cache (dieser Datei), NICHT die
 orion-KB (`knowledge-base/agents/stella/target-cache.md`) — astra ist ein
@@ -115,11 +116,35 @@ def _write_mock_cache(tmp_path: Path) -> Path:
     return p
 
 
-def _write_config_with_cache(tmp_path: Path, cache_path: Path, name: str = "config.yaml") -> Path:
-    """DEFAULT_CONFIG + suggest.target_cache_path, analog bestehendem Muster
-    (_write_config_with_preset_stacking in test_sigma_clipped_cli_precedence.py)."""
+def _make_astra_root(base: Path, *target_names: str) -> Path:
+    """Legt <base>/AstraRoot/ + je Target <AstraRoot>/<name>/lights/ an.
+
+    DEF-012-Guard (Ghost-Ordner-Fix): suggest schreibt nur in Ordner die
+    bereits als Target existieren (Ordner + lights/ vorhanden). Tests die
+    suggest ohne --output aufrufen, brauchen diese Struktur im tmp_path.
+    """
+    root = base / "AstraRoot"
+    for name in target_names:
+        (root / name / "lights").mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _write_config_with_cache(
+    tmp_path: Path,
+    cache_path: Path,
+    name: str = "config.yaml",
+    data_root: Path | None = None,
+) -> Path:
+    """DEFAULT_CONFIG + suggest.target_cache_path + optionaler data_root.
+
+    data_root: wenn gesetzt, wird data_root im Config auf diesen Pfad
+    umgebogen (noetig fuer Tests die suggest ohne --output aufrufen —
+    DEF-012-Guard prueft Ordner-Existenz unter data_root/<Target>/lights/).
+    """
     data = yaml.safe_load(DEFAULT_CONFIG)
     data["suggest"] = {"target_cache_path": str(cache_path)}
+    if data_root is not None:
+        data["data_root"] = str(data_root)
     cfg_path = tmp_path / name
     cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return cfg_path
@@ -167,7 +192,10 @@ def _last_json_line(output: str) -> dict:
 class TestAcSug1StdoutThreeTargets:
     def test_suggest_stdout_three_targets(self, tmp_path):
         cache = _write_mock_cache(tmp_path)
-        cfg_path = _write_config_with_cache(tmp_path, cache)
+        # DEF-012-Guard: suggest schreibt Default <data_root>/<Target>/suggested.yaml
+        # -> Ordner + lights/ muessen vorhanden sein.
+        astra_root = _make_astra_root(tmp_path, "M31", "M27", "C19")
+        cfg_path = _write_config_with_cache(tmp_path, cache, data_root=astra_root)
         runner = CliRunner()
 
         expectations = [
@@ -186,6 +214,7 @@ class TestAcSug1StdoutThreeTargets:
                 assert "astroalign" in result.output
                 assert "1)" in result.output
                 assert "CLI: astra process" in result.output
+                assert "--from-suggested" in result.output  # v1.11 F-1: Pflicht-Flag im Vorschlag
                 assert "Handbook" in result.output
                 assert "Source: cache hit" in result.output
             # Cache-Hits fragen SIMBAD nicht an (offline-first, hal)
@@ -201,7 +230,9 @@ class TestAcSug1StdoutThreeTargets:
         mit Space) muss denselben Cache-Hit liefern wie `suggest "C19"` —
         vorher fiel "C 19" auf den generischen handbook_fallback zurueck."""
         cache = _write_mock_cache(tmp_path)
-        cfg_path = _write_config_with_cache(tmp_path, cache)
+        # DEF-012-Guard: "C 19" und "C19" brauchen je einen Ordner mit lights/
+        astra_root = _make_astra_root(tmp_path, "C 19", "C19")
+        cfg_path = _write_config_with_cache(tmp_path, cache, data_root=astra_root)
         runner = CliRunner()
 
         with patch.object(suggest_mod, "query_simbad", side_effect=_offline_simbad) as mock_simbad:
@@ -234,7 +265,10 @@ class TestAcSug2HeaderReadsFits:
 
     def test_suggest_header_reads_fits(self, tmp_path):
         cache = _write_mock_cache(tmp_path)
-        cfg_path = _write_config_with_cache(tmp_path, cache)
+        # DEF-012-Guard: --header resolved OBJECT=M27 -> Default-Output <data_root>/M27/...
+        # M31 wird auch getestet (Override), braucht daher ebenfalls einen Ordner.
+        astra_root = _make_astra_root(tmp_path, "M27", "M31")
+        cfg_path = _write_config_with_cache(tmp_path, cache, data_root=astra_root)
         fits_path = tmp_path / "M27_001.fits"
         self._write_dummy_fits(fits_path)
         runner = CliRunner()
@@ -264,7 +298,9 @@ class TestAcSug2HeaderReadsFits:
     def test_suggest_header_incomplete_warns(self, tmp_path):
         """Fehlende Pflicht-Header-Keys -> WARN suggest.header_incomplete, kein Abbruch."""
         cache = _write_mock_cache(tmp_path)
-        cfg_path = _write_config_with_cache(tmp_path, cache)
+        # DEF-012-Guard: OBJECT=M31 -> Default-Output <data_root>/M31/...
+        astra_root = _make_astra_root(tmp_path, "M31")
+        cfg_path = _write_config_with_cache(tmp_path, cache, data_root=astra_root)
         fits_path = tmp_path / "incomplete.fits"
         hdu = fits.PrimaryHDU(np.zeros((4, 4), dtype=np.float32))
         hdu.header["OBJECT"] = "M31"
@@ -290,8 +326,10 @@ class TestAcSug2HeaderReadsFits:
 class TestCoordsFlag:
     def test_coords_happy_path_fallback_target(self, tmp_path):
         """No TARGET/--header: --coords resolves a fallback target
-        (RA<deg>_DEC<deg>) and is used only for SIMBAD lookup/labeling
-        (suggest.coords_fallback warning), never a crash (AC-SUG-2/4)."""
+        (RA<deg>_DEC<deg>) for SIMBAD lookup/labeling
+        (suggest.coords_fallback warning). Since ENTS-5: cache miss +
+        offline → Exit 2 suggest.simbad_unavailable (no generic fallback).
+        With SIMBAD available, should succeed. Here we test offline case."""
         cache = _write_mock_cache(tmp_path)
         cfg_path = _write_config_with_cache(tmp_path, cache)
         runner = CliRunner()
@@ -300,11 +338,11 @@ class TestCoordsFlag:
             result = runner.invoke(
                 cli, ["-c", str(cfg_path), "suggest", "--coords", "10.0", "20.0"]
             )
-        assert result.exit_code == 0, result.output
-        assert result.exception is None
+        # ENTS-5: unknown target (RA/DEC synthetic) + offline → Exit 2
+        assert result.exit_code == 2, result.output
         assert '"event": "suggest.coords_fallback"' in result.output
-        assert "Target: RA10_DEC20" in result.output
-        # cache miss for the synthetic RA/DEC target -> SIMBAD attempted once
+        assert "suggest.simbad_unavailable" in result.output
+        # SIMBAD was attempted once (cache miss for synthetic target)
         mock_simbad.assert_called_once()
 
     def test_coords_error_path_english_message(self, tmp_path):
@@ -332,7 +370,12 @@ class TestCoordsFlag:
 class TestAcSug3JsonAndOutput:
     def test_suggest_json_and_output_yaml_valid(self, tmp_path):
         cache = _write_mock_cache(tmp_path)
-        cfg_path = _write_config_with_cache(tmp_path, cache)
+        # DEF-012-Guard: alle suggest "M31"-Aufrufe (mit + ohne --output)
+        # brauchen M31/lights/ im data_root. --output-Pfade liegen in tmp_path/M31/
+        # -> ebenfalls lights/ benoetigt.
+        astra_root = _make_astra_root(tmp_path, "M31")
+        (tmp_path / "M31" / "lights").mkdir(parents=True, exist_ok=True)
+        cfg_path = _write_config_with_cache(tmp_path, cache, data_root=astra_root)
         runner = CliRunner()
 
         with patch.object(suggest_mod, "query_simbad", side_effect=_offline_simbad):
@@ -377,49 +420,96 @@ class TestAcSug3JsonAndOutput:
             assert file_json_data["preset"] == stdout_data["preset"] == "galaxy_standard"
             assert file_json_data["registration"] == stdout_data["registration"]
 
-    def test_suggest_output_bare_flag_default_target_root(self, tmp_path, monkeypatch):
-        """`--output` ohne Pfad -> Default `<data_root>/<Target>/suggested.yaml`."""
+    def test_suggest_always_writes_default(self, tmp_path):
+        """AC-ENTS-1: `astra suggest M31` (ohne --output) schreibt immer
+        <data_root>/M31/suggested.yaml (Target-Root-Default, ENTS-1)."""
         cache = _write_mock_cache(tmp_path)
+        # DEF-012-Guard: M31/lights/ muss im AstraRoot vorhanden sein
+        astra_root = tmp_path / "AstraRoot"
+        (astra_root / "M31" / "lights").mkdir(parents=True, exist_ok=True)
         data = yaml.safe_load(DEFAULT_CONFIG)
         data["suggest"] = {"target_cache_path": str(cache)}
-        data["data_root"] = str(tmp_path / "AstraRoot")
+        data["data_root"] = str(astra_root)
         cfg_path = tmp_path / "config.yaml"
         cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
         runner = CliRunner()
 
+        # (a) Ohne --output -> schreibt Default <data_root>/M31/suggested.yaml
         with patch.object(suggest_mod, "query_simbad", side_effect=_offline_simbad):
-            result = runner.invoke(cli, ["-c", str(cfg_path), "suggest", "M31", "--output"])
+            result = runner.invoke(cli, ["-c", str(cfg_path), "suggest", "M31"])
         assert result.exit_code == 0, result.output
         expected_path = tmp_path / "AstraRoot" / "M31" / "suggested.yaml"
         assert expected_path.is_file(), result.output
+        file_data = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
+        assert file_data["version"] == 1
+        assert file_data["target"] == "M31"
+        assert file_data["preset"] == "galaxy_standard"
+        assert file_data["registration"]["method"] in ("astroalign", "fft")
+        assert file_data["debayer"]["method"] == "superpixel"
+        assert file_data["pcc"]["enabled"] is True
         assert '"event": "suggest.wrote_suggested"' in result.output
 
+        # (b) Mit --output Pfad -> schreibt dort (Override)
+        explicit_path = tmp_path / "AstraRoot" / "M31" / "suggested_20260905.yaml"
+        with patch.object(suggest_mod, "query_simbad", side_effect=_offline_simbad):
+            result2 = runner.invoke(
+                cli, ["-c", str(cfg_path), "suggest", "M31", "--output", str(explicit_path)]
+            )
+        assert result2.exit_code == 0, result2.output
+        assert explicit_path.is_file()
+        file_data2 = yaml.safe_load(explicit_path.read_text(encoding="utf-8"))
+        assert file_data2["preset"] == "galaxy_standard"
+
+        # (c) --json + .json Suffix -> valides JSON File + konsistentes stdout
+        json_out = tmp_path / "AstraRoot" / "M31" / "suggested.json"
+        with patch.object(suggest_mod, "query_simbad", side_effect=_offline_simbad):
+            result3 = runner.invoke(
+                cli,
+                ["-c", str(cfg_path), "suggest", "M31", "--output", str(json_out), "--json"],
+            )
+        assert result3.exit_code == 0, result3.output
+        assert json_out.is_file()
+        file_json = json.loads(json_out.read_text(encoding="utf-8"))
+        stdout_json = _last_json_line(result3.output)
+        assert file_json["preset"] == stdout_json["preset"] == "galaxy_standard"
+        assert file_json["registration"] == stdout_json["registration"]
+
 
 # ═══════════════════════════════════════════════════════════════════════
-# AC-SUG-4 — SIMBAD offline -> Cache-only + Warning, kein Crash (OQ-SUG-1)
+# AC-ENTS-4 — SIMBAD offline + unbekanntes Target -> Error Exit 2
+#              (ENTS-5: kein generischer Fallback mehr)
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class TestAcSug4OfflineCacheOnly:
-    def test_suggest_offline_cache_only_warns_no_crash(self, tmp_path):
+class TestAcEnts4OfflineUnknownTargetFails:
+    def test_suggest_offline_unknown_target_fails(self, tmp_path):
+        """AC-ENTS-4: Cache-Miss + SIMBAD offline -> Exit 2
+        suggest.simbad_unavailable, kein File geschrieben, kein Traceback."""
         cache = _write_mock_cache(tmp_path)
-        cfg_path = _write_config_with_cache(tmp_path, cache)
+        # DEF-012-Guard: M31 (Cache-Hit) braucht Ordner+lights/, NGC 9999 scheitert
+        # VOR dem Guard (suggest.simbad_unavailable) -> kein Ordner noetig.
+        astra_root = tmp_path / "AstraRoot"
+        (astra_root / "M31" / "lights").mkdir(parents=True, exist_ok=True)
+        data = yaml.safe_load(DEFAULT_CONFIG)
+        data["suggest"] = {"target_cache_path": str(cache)}
+        data["data_root"] = str(astra_root)
+        cfg_path = tmp_path / "config.yaml"
+        cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
         runner = CliRunner()
 
         with patch.object(suggest_mod, "query_simbad") as mock_simbad:
             mock_simbad.side_effect = _offline_simbad
-            # Cache-Miss (erfundenes Target) + offline -> Exit 0, WARN, generischer Fallback
             result_miss = runner.invoke(cli, ["-c", str(cfg_path), "suggest", "NGC 9999"])
-            assert result_miss.exit_code == 0, result_miss.output
-            assert result_miss.exception is None
-            assert '"event": "suggest.simbad_unavailable"' in result_miss.output
-            assert "[WARN] suggest.simbad_unavailable" in result_miss.output
-            assert "Source: cache miss, simbad unavailable" in result_miss.output
-            # generischer Fallback: mind. eine der beiden generischen Presets vorhanden
-            assert "nebula_standard" in result_miss.output or "star_standard" in result_miss.output
+            # ENTS-5: Error Exit 2, kein generischer Fallback
+            assert result_miss.exit_code == 2, result_miss.output
+            assert "suggest.simbad_unavailable" in result_miss.output
+            # kein Traceback (ClickException, sauber)
+            assert "Traceback" not in result_miss.output
+            # kein File geschrieben (raise passiert vor write)
+            assert not (astra_root / "NGC 9999" / "suggested.yaml").exists()
             mock_simbad.assert_called_once()
 
-        # Cache-Hit (M31) trotz Offline -> Exit 0, "cache hit", KEINE SIMBAD-Query, kein Warning
+        # Cache-Hit (M31) trotz Offline -> weiter Exit 0 (nur unbekanntes Target wird Error)
         with patch.object(suggest_mod, "query_simbad") as mock_simbad_hit:
             mock_simbad_hit.side_effect = AssertionError("SIMBAD darf bei Cache-Hit nicht aufgerufen werden")
             result_hit = runner.invoke(cli, ["-c", str(cfg_path), "suggest", "M31"])
@@ -428,20 +518,21 @@ class TestAcSug4OfflineCacheOnly:
         assert "Source: cache hit" in result_hit.output
         assert "suggest.simbad_unavailable" not in result_hit.output
 
-    def test_suggest_no_click_exception_on_offline_miss(self, tmp_path):
-        """Explizit: kein ClickException/Traceback bei Cache-Miss + Offline (AC-SUG-4)."""
+    def test_suggest_offline_unknown_no_traceback(self, tmp_path):
+        """Explizit: kein Traceback bei Cache-Miss + Offline (ENTS-5, sauber Exit 2)."""
         cache = _write_mock_cache(tmp_path)
         cfg_path = _write_config_with_cache(tmp_path, cache)
         runner = CliRunner()
         with patch.object(suggest_mod, "query_simbad", side_effect=_offline_simbad):
             result = runner.invoke(cli, ["-c", str(cfg_path), "suggest", "Completely Unknown Object"])
-        assert result.exit_code == 0
-        assert result.exception is None
+        assert result.exit_code == 2
+        assert "Traceback" not in result.output
+        assert "suggest.simbad_unavailable" in result.output
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# AC-SUG-5 — process --from-suggested: Precedence CLI > File > Config > Default,
-#            ohne Flag byte-identisch (kein Auto-Discover, Flip-Test)
+# AC-ENTS-3 — process --from-suggested: Pflicht; ohne Flag Error;
+#             mit Flag+File Preset aus File; CLI gewinnt; OQ-ENTS-2 B
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -460,8 +551,13 @@ def _write_suggested_yaml(path: Path, **overrides) -> Path:
     return path
 
 
-class TestAcSug5ProcessFromSuggested:
-    def test_process_from_suggested_precedence_cli_wins(self, tmp_path):
+class TestAcEnts3ProcessRequiresFromSuggested:
+    """AC-ENTS-3: --from-suggested Pflicht, CLI gewinnt, OQ-ENTS-2 B."""
+
+    def test_process_requires_from_suggested_and_cli_wins(self, tmp_path):
+        """Mit Flag+File -> effective-Werte + Log process.from_suggested;
+        ohne Flag -> Exit 2 process.from_suggested.missing + Hint;
+        CLI-Overrides gewinnen ueber File."""
         target = _create_light_target(tmp_path)
         suggested = _write_suggested_yaml(tmp_path / "suggested.yaml")
         runner = CliRunner()
@@ -477,9 +573,14 @@ class TestAcSug5ProcessFromSuggested:
         assert "Pipeline: galaxy_standard" in result_a.output
         assert '"max_rotation_deg": 30.0' in result_a.output
         assert '"method": "malvar"' in result_a.output  # cli.process.debayer
-        # PCC aus File (enabled=True) greift, da galaxy_standard schon PCC-Step hat -> noop True
-        assert '"pcc.cli_override"' in result_a.output.replace('"event": "pcc.cli_override"', '"pcc.cli_override"') or '"event": "pcc.cli_override"' in result_a.output
+        # PCC aus File (enabled=True) greift
+        assert '"event": "pcc.cli_override"' in result_a.output
         assert '"enabled": true' in result_a.output
+
+        # (b) Ohne Flag -> Exit 2 process.from_suggested.missing + Hint
+        result_b = runner.invoke(cli, ["process", str(target), "--dry-run"])
+        assert result_b.exit_code == 2, result_b.output
+        assert "process.from_suggested.missing" in result_b.output
 
         # (c) CLI gewinnt ueber File (alle 4 Felder ueberschrieben)
         result_c = runner.invoke(
@@ -501,20 +602,46 @@ class TestAcSug5ProcessFromSuggested:
         # File-Preset darf NICHT durchsickern
         assert "Pipeline: galaxy_standard" not in result_c.output
 
+    def test_process_from_suggested_default_without_value(self, tmp_path):
+        """OQ-ENTS-2 B: --from-suggested ohne Wert -> Default <Target>/suggested.yaml.
+        Liegt File vor -> gleiches Ergebnis wie explizit;
+        fehlt File -> Exit 2 process.from_suggested.not_found + Hint."""
+        target = _create_light_target(tmp_path)
+        runner = CliRunner()
+
+        # (a2) Flag ohne Wert, aber suggested.yaml liegt im Target -> Default auflösen
+        suggested = _write_suggested_yaml(target / "suggested.yaml")
+        result_a2 = runner.invoke(
+            cli, ["process", str(target), "--dry-run", "--from-suggested"]
+        )
+        assert result_a2.exit_code == 0, result_a2.output
+        assert '"event": "process.from_suggested"' in result_a2.output
+        assert "Pipeline: galaxy_standard" in result_a2.output
+
+        # Vergleich mit explizitem Pfad -> gleiches Ergebnis
+        result_explicit = runner.invoke(
+            cli, ["process", str(target), "--dry-run", "--from-suggested", str(suggested)]
+        )
+        assert result_explicit.exit_code == 0, result_explicit.output
+
+        # (not_found) Flag ohne Wert, suggested.yaml fehlt -> Exit 2 not_found
+        target2 = _create_light_target(tmp_path, name="NoFileTarget")
+        result_notfound = runner.invoke(
+            cli, ["process", str(target2), "--dry-run", "--from-suggested"]
+        )
+        assert result_notfound.exit_code == 2, result_notfound.output
+        assert "process.from_suggested.not_found" in result_notfound.output
+
     def test_process_from_suggested_file_wins_over_config(self, tmp_path):
-        """ray-review M3: proves File > Config precedence (AC-SUG-5) — the
-        test above only proves File > hardcoded-default and CLI > File.
-        Config sets debayer_method=bilinear + pcc.enabled=False; the
-        suggested file (no CLI overrides) requests malvar/True and must
-        win over the Config values."""
+        """OQ-ENTS-3 A: File > Config precedence — Config sets
+        debayer_method=bilinear; suggested file requests malvar (wins)."""
         target = _create_light_target(tmp_path)
         data = yaml.safe_load(DEFAULT_CONFIG)
         data["debayer_method"] = "bilinear"
         data["pcc"] = {"enabled": False}
         cfg_path = tmp_path / "config.yaml"
         cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-        # Default _write_suggested_yaml already carries debayer.method=malvar
-        # + pcc.enabled=True (the opposite of the Config values above).
+        # Default _write_suggested_yaml carries debayer.method=malvar + pcc.enabled=True
         suggested = _write_suggested_yaml(tmp_path / "suggested_precedence.yaml")
         runner = CliRunner()
 
@@ -526,10 +653,10 @@ class TestAcSug5ProcessFromSuggested:
             ],
         )
         assert result.exit_code == 0, result.output
-        # File wins over Config: malvar (not bilinear) ...
+        # File wins over Config: malvar (not bilinear)
         assert '"method": "malvar"' in result.output  # cli.process.debayer
         assert '"method": "bilinear"' not in result.output
-        # ... and pcc enabled=true (not the Config's false)
+        # pcc enabled=true (not the Config's false)
         pcc_override_lines = [
             line for line in result.output.splitlines() if '"event": "pcc.cli_override"' in line
         ]
@@ -537,38 +664,140 @@ class TestAcSug5ProcessFromSuggested:
         assert all('"enabled": true' in line for line in pcc_override_lines)
         assert all('"enabled": false' not in line for line in pcc_override_lines)
 
-    def test_process_suggest_no_auto_discover(self, tmp_path):
-        """(b) Flip-Test: suggested.yaml liegt im Target, OHNE --from-suggested
-        bleibt process byte-identisch (kein Auto-Discover, AC-SUG-5b)."""
+    def test_process_no_auto_discover_without_flag(self, tmp_path):
+        """ENTS-3: suggested.yaml liegt im Target, OHNE --from-suggested
+        -> Exit 2 process.from_suggested.missing (kein Auto-Discover, ENTS-3)."""
         target = _create_light_target(tmp_path)
-        # suggested.yaml direkt IM Target-Ordner (realistischer Auto-Discover-Koeder)
+        # suggested.yaml direkt IM Target-Ordner
         _write_suggested_yaml(target / "suggested.yaml")
         runner = CliRunner()
 
         result_without_flag = runner.invoke(cli, ["process", str(target), "--dry-run"])
-        assert result_without_flag.exit_code == 0, result_without_flag.output
-        assert "process.from_suggested" not in result_without_flag.output
-        # Default-Preset (DEFAULT_CONFIG: star_standard) bleibt unveraendert,
-        # NICHT das im (ungenutzten) File stehende galaxy_standard.
-        assert "Pipeline: star_standard" in result_without_flag.output
-        assert "Pipeline: galaxy_standard" not in result_without_flag.output
-
-        # Gegenprobe: byte-identisches Verhalten zu einem Lauf ganz ohne File im Ordner
-        target2 = _create_light_target(tmp_path, name="TestTargetNoFile")
-        result_reference = runner.invoke(cli, ["process", str(target2), "--dry-run"])
-        assert result_reference.exit_code == 0
-        assert "Pipeline: star_standard" in result_reference.output
+        # ENTS-3: ohne Flag -> Pflicht-Error Exit 2 (kein byte-identisch mehr)
+        assert result_without_flag.exit_code == 2, result_without_flag.output
+        assert "process.from_suggested.missing" in result_without_flag.output
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# AC-SUG-6 — Handbook-Zitat, kein hart-codierter Baum, Cache-Update ohne Deploy
+# AC-ENTS-5 — Keine Preset-Heuristik ohne File (Negativ-Greps + Error-Cases)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestAcEnts5NoPresetHeuristicsWithoutFile:
+    """AC-ENTS-5: Negativ-Greps + Error-Cases fuer gestraffte Pipeline."""
+
+    def test_no_default_preset_in_process_path(self):
+        """Kein cfg.default_preset Fallback im process-Pfad von cli.py."""
+        cli_path = Path(__file__).resolve().parent.parent / "src" / "astro_process" / "cli.py"
+        text = cli_path.read_text(encoding="utf-8")
+        # Finde process-Funktion und prüfe auf default_preset NICHT als Fallback
+        # "preset = cfg.default_preset" ohne Guard darf nicht im process-Block vorkommen
+        # (Ausnahmen: batch-Docstring, init/interactive Presets — ausserhalb des process-Pfads)
+        process_start = text.find("def process(")
+        # Ende des process-Blocks: naechste @cli.command() Deklaration
+        next_command = text.find("@cli.command()", process_start + 1)
+        process_block = text[process_start:next_command]
+        # "preset = cfg.default_preset" als Fallback-Zuweisung darf nicht vorkommen
+        assert "preset = cfg.default_preset" not in process_block, (
+            "Gefunden: 'preset = cfg.default_preset' im process-Block (ENTS-6)"
+        )
+
+    def test_no_galaxy_standard_hardcode_in_cli_process(self):
+        """Kein 'or \"galaxy_standard\"' im cli.py process-Pfad."""
+        cli_path = Path(__file__).resolve().parent.parent / "src" / "astro_process" / "cli.py"
+        text = cli_path.read_text(encoding="utf-8")
+        process_start = text.find("def process(")
+        next_command = text.find("@cli.command()", process_start + 1)
+        process_block = text[process_start:next_command]
+        assert 'or "galaxy_standard"' not in process_block, (
+            "Gefunden: 'or \"galaxy_standard\"' im process-Block (ENTS-6)"
+        )
+
+    def test_no_superpixel_hardcode_in_cli_process(self):
+        """Kein 'or \"superpixel\"' Fallback im cli.py process-Pfad (ENTS-4)."""
+        cli_path = Path(__file__).resolve().parent.parent / "src" / "astro_process" / "cli.py"
+        text = cli_path.read_text(encoding="utf-8")
+        process_start = text.find("def process(")
+        next_command = text.find("@cli.command()", process_start + 1)
+        process_block = text[process_start:next_command]
+        assert 'or "superpixel"' not in process_block, (
+            "Gefunden: 'or \"superpixel\"' Hardcode im process-Block (ENTS-4)"
+        )
+
+    def test_no_fallback_code_in_suggest_core(self):
+        """_FALLBACK_PRESET_PAIRS und _build_fallback_options wurden entfernt (ENTS-5)."""
+        suggest_path = (
+            Path(__file__).resolve().parent.parent
+            / "src" / "astro_process" / "core" / "suggest.py"
+        )
+        text = suggest_path.read_text(encoding="utf-8")
+        assert "_FALLBACK_PRESET_PAIRS" not in text, "_FALLBACK_PRESET_PAIRS noch vorhanden"
+        assert "_build_fallback_options" not in text, "_build_fallback_options noch vorhanden"
+        assert "handbook_fallback" not in text, "handbook_fallback noch vorhanden"
+
+    def test_process_file_without_registration_errors(self, tmp_path):
+        """File ohne `registration` + Config ohne registration -> Error
+        process.registration_method.missing (OQ-ENTS-3 A: null→Config only
+        when Config has a value; hier hat Config keinen registration-Block,
+        kein silent fft Fallback, ENTS-4)."""
+        target = _create_light_target(tmp_path)
+        # Config OHNE registration-Block (kein Supplement-Fallback)
+        data = yaml.safe_load(DEFAULT_CONFIG)
+        data.pop("registration", None)  # registration-Block entfernen
+        cfg_path = tmp_path / "config_no_reg.yaml"
+        cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        # File ohne registration-Feld
+        suggested_path = tmp_path / "suggested_no_reg.yaml"
+        file_data = {
+            "version": 1,
+            "target": "TestTarget",
+            "preset": "galaxy_standard",
+            "debayer": {"method": "superpixel"},
+            "pcc": {"enabled": False},
+            "source": "cache",
+        }
+        suggested_path.write_text(yaml.safe_dump(file_data), encoding="utf-8")
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["-c", str(cfg_path), "process", str(target), "--dry-run",
+                  "--from-suggested", str(suggested_path)]
+        )
+        assert result.exit_code == 2, result.output
+        assert "process.registration_method.missing" in result.output
+
+    def test_process_file_without_preset_errors(self, tmp_path):
+        """File ohne `preset` -> Error Exit 2 process.preset.missing (ENTS-4)."""
+        target = _create_light_target(tmp_path)
+        suggested_path = tmp_path / "suggested_no_preset.yaml"
+        data = {
+            "version": 1,
+            "target": "TestTarget",
+            "registration": {"method": "fft", "max_rotation_deg": 2},
+            "debayer": {"method": "superpixel"},
+            "pcc": {"enabled": False},
+            "source": "cache",
+        }
+        suggested_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["process", str(target), "--dry-run", "--from-suggested", str(suggested_path)]
+        )
+        assert result.exit_code == 2, result.output
+        assert "process.preset.missing" in result.output
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# AC-SUG-6 / AC-ENTS-2 — Handbook-Zitat, kein hart-codierter Baum,
+#                          Cache-Update ohne Deploy
 # ═══════════════════════════════════════════════════════════════════════
 
 
 class TestAcSug6HandbookCitationNoHardcodedTree:
     def test_suggest_handbook_citation_no_hardcoded_tree(self, tmp_path):
         cache = _write_mock_cache(tmp_path)
-        cfg_path = _write_config_with_cache(tmp_path, cache)
+        # DEF-012-Guard: alle Targets brauchen Ordner+lights/ im data_root
+        astra_root = _make_astra_root(tmp_path, "M31", "C19", "M13", "NGC 7000")
+        cfg_path = _write_config_with_cache(tmp_path, cache, data_root=astra_root)
         runner = CliRunner()
 
         with patch.object(suggest_mod, "query_simbad", side_effect=_offline_simbad):
@@ -686,9 +915,12 @@ class TestM5TemplateAndHints:
         hdu.header["EXPTIME"] = 60.0
         fits_path = tmp_path / "M27_001.fits"
         hdu.writeto(fits_path, overwrite=True)
+        # V1.11: build_result needs a cache (M27 must be in cache, otherwise
+        # offline miss -> SuggestInputError ENTS-5).
+        cache = _write_mock_cache(tmp_path)
 
         with patch.object(suggest_mod, "query_simbad", side_effect=_offline_simbad):
-            result = suggest_mod.build_result(target=None, header_path=fits_path)
+            result = suggest_mod.build_result(target=None, header_path=fits_path, cache_path=cache)
         data = suggest_mod.to_file_dict(result)
 
         assert data["equipment_hint"] == "dwarf_mini"
@@ -715,6 +947,8 @@ class TestM5TemplateAndHints:
             result = suggest_mod.build_result(target="M31", cache_path=cache)
         data = suggest_mod.to_file_dict(result)
         out_path = tmp_path / "suggested.yaml"
+        # DEF-012-Guard: out_path.parent = tmp_path -> lights/ muss vorhanden sein
+        (tmp_path / "lights").mkdir(exist_ok=True)
 
         suggest_mod.write_suggested_file(data, out_path)
         text = out_path.read_text(encoding="utf-8")
@@ -752,6 +986,8 @@ class TestM5TemplateAndHints:
             result = suggest_mod.build_result(target="M31", cache_path=cache)
         data = suggest_mod.to_file_dict(result)
         out_path = tmp_path / "suggested_fallback.yaml"
+        # DEF-012-Guard: out_path.parent = tmp_path -> lights/ muss vorhanden sein
+        (tmp_path / "lights").mkdir(exist_ok=True)
 
         suggest_mod.write_suggested_file(data, out_path)
         loaded = yaml.safe_load(out_path.read_text(encoding="utf-8"))

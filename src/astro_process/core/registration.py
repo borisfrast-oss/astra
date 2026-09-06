@@ -932,8 +932,12 @@ def register_frames(
     # QF-B (AC-QF-B1): Qualitaets-Metriken des Referenz-Frames auf dem
     # Registrations-Kanal. correlation bleibt None (keine Shift-Metrik
     # fuer die Referenz). Fehler -> leere Metrik + Warning, nie Abbruch.
+    # DEF-011 Duo-Band: narrow OIII filter dimmt Sterne -> star_count 16-25
+    # statt 40-50 (30s40). Niedrigere Schwelle erhöht Trefferquote für
+    # astroalign (n_CP 14 -> höher) und vermeidet fft rotation 0 Fallback.
+    _duo_thresh = 3.5 if filter_name == "Duo-Band" else 5.0
     try:
-        ref_quality = compute_frame_quality(ref_mono)
+        ref_quality = compute_frame_quality(ref_mono, detect_threshold=_duo_thresh)
         ref_quality.frame = str(frames[0])
     except Exception as e:  # noqa: BLE001 - QF darf die Registration nie stoppen
         logger.warning("quality.compute_failed", path=str(frames[0]),
@@ -955,8 +959,9 @@ def register_frames(
         # QF-B (AC-QF-B1): Frame-Metriken auf dem Registrations-Kanal
         # (nach Kalibration — Frames sind hier bereits kalibriert).
         # correlation wird nach der finalen corr_hp-Messung gefuellt.
+        # DEF-011 Duo-Band: gleiche Schwellen-Anpassung wie Referenz
         try:
-            target_quality = compute_frame_quality(target_mono)
+            target_quality = compute_frame_quality(target_mono, detect_threshold=_duo_thresh)
             target_quality.frame = str(frame_path)
         except Exception as e:  # noqa: BLE001 - QF darf die Registration nie stoppen
             logger.warning("quality.compute_failed", path=str(frame_path),

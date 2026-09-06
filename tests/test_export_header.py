@@ -44,6 +44,7 @@ from astro_process.core.registration import (  # noqa: E402
 )
 from astro_process.config.models import (  # noqa: E402
     MultiGroupConfig,
+    PipelineStep,
     ProcessingParams,
 )
 from astro_process.models.core import (  # noqa: E402
@@ -471,7 +472,13 @@ class TestMultiGroupMergeExport:
         context.get_lights().frames[0].header.raw_cards = dict(LIGHT_RAW_CARDS)
         pipeline = MagicMock()
         pipeline.processing_params = ProcessingParams()
-        pipeline.steps = []
+        # DEF-014-Fix: photometric_color_calibration-Step noetig damit PCC laeuft
+        pipeline.steps = [
+            PipelineStep(name="register_frames"),
+            PipelineStep(name="stack_frames"),
+            PipelineStep(name="photometric_color_calibration"),
+            PipelineStep(name="export"),
+        ]
 
         lights = context.get_lights()
         cal_result = MagicMock()

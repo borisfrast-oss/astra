@@ -31,7 +31,9 @@ from astropy.io import fits
 from click.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from conftest import write_default_suggested  # noqa: E402
 from astro_process.config.loader import DEFAULT_CONFIG, resolve_frame_selection  # noqa: E402
 from astro_process.config.models import AppConfig, FrameSelectionConfig, PipelinePreset  # noqa: E402
 from astro_process.core.quality import FrameQuality, compute_frame_quality, compute_frame_score, qual_to_dict  # noqa: E402
@@ -474,25 +476,30 @@ class TestFSEL_D:
         hdu.header["CCD-TEMP"] = -10
         hdu.writeto(target / "light_0001.fits", overwrite=True)
 
+        write_default_suggested(target)
         runner = CliRunner()
         # --frame-selection + keep 80 → im Log enabled true / keep 80
-        res_on = runner.invoke(cli, ["process", str(target), "--dry-run", "--frame-selection", "--keep-percentile", "80"])
+        res_on = runner.invoke(cli, ["process", str(target), "--dry-run", "--from-suggested",
+                                     "--frame-selection", "--keep-percentile", "80"])
         assert res_on.exit_code == 0, res_on.output
         assert "cli.process.frame_selection" in res_on.output
         assert '"enabled": true' in res_on.output
         assert '"keep_percentile": 80' in res_on.output or '"keep_percentile":80' in res_on.output or "keep_percentile" in res_on.output
 
         # --no-frame-selection → disabled
-        res_off = runner.invoke(cli, ["process", str(target), "--dry-run", "--no-frame-selection"])
+        res_off = runner.invoke(cli, ["process", str(target), "--dry-run", "--from-suggested",
+                                      "--no-frame-selection"])
         assert res_off.exit_code == 0, res_off.output
         assert "cli.process.frame_selection" in res_off.output
         assert '"enabled": false' in res_off.output
 
         # --keep-percentile ohne --frame-selection → trotzdem wirksam (Config/Preset Default)
-        res_keep_only = runner.invoke(cli, ["process", str(target), "--dry-run", "--keep-percentile", "75"])
+        res_keep_only = runner.invoke(cli, ["process", str(target), "--dry-run", "--from-suggested",
+                                            "--keep-percentile", "75"])
         assert res_keep_only.exit_code == 0, res_keep_only.output
         # Ungültiger keep Wert → Click Error 2
-        res_bad = runner.invoke(cli, ["process", str(target), "--dry-run", "--keep-percentile", "150"])
+        res_bad = runner.invoke(cli, ["process", str(target), "--dry-run", "--from-suggested",
+                                      "--keep-percentile", "150"])
         assert res_bad.exit_code == 2
 
         # Hilfe nennt Flags

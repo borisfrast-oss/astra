@@ -21,6 +21,8 @@ from click.testing import CliRunner
 
 # ── Ensure src is on the path ─────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from conftest import write_default_suggested  # noqa: E402
 
 from astro_process.config.models import (
     AppConfig,
@@ -370,6 +372,7 @@ def run_multi_group_pipeline(
     mg_config: Optional[MultiGroupConfig] = None,
     fake_pcc_status: str = "gaia_success",
     with_fallback_marker: bool = False,
+    with_pcc_step: bool = True,
 ) -> ProcessingResult:
     """CR-001 P1/P2 Helper: process_multi_group mit 2 synthetischen Gruppen,
     gemockte schwere Schritte (register/stack/cross-registration/pcc).
@@ -377,13 +380,25 @@ def run_multi_group_pipeline(
     Legt Gruppen-Dirs an (group_15s60, group_60s40), erzeugt PCC-Dateien und
     echte Gruppen-Previews (create_preview_jpg ist real — nur wenn nicht gepatcht).
     Gibt das ProcessingResult zurück.
+
+    with_pcc_step: True (Default) = Preset hat photometric_color_calibration-Step
+    (DEF-014-Fix: PCC nur wenn Step im Preset).
     """
     if mg_config is None:
         mg_config = MultiGroupConfig()
     context = make_sample_context(tmp_dir, group_count=2, frames_per_group=3)
     pipeline = MagicMock()
     pipeline.processing_params = ProcessingParams()
-    pipeline.steps = []
+    # DEF-014-Fix: PCC-Step explizit setzen (Default: mit PCC-Step fuer PCC-Tests)
+    if with_pcc_step:
+        pipeline.steps = [
+            PipelineStep(name="register_frames"),
+            PipelineStep(name="stack_frames"),
+            PipelineStep(name="photometric_color_calibration"),
+            PipelineStep(name="export"),
+        ]
+    else:
+        pipeline.steps = []
 
     lights = context.get_lights()
     cal_result = MagicMock()
@@ -2337,63 +2352,66 @@ class TestT11CLI:
 
     def test_cli_multi_group_flag(self, runner: CliRunner, tmp_dir: Path):
         """--multi-group sets auto_group and merge."""
-        # We'll test the flag parsing by invoking dry-run
+        write_default_suggested(tmp_dir)
         result = runner.invoke(
-            cli, ["process", str(tmp_dir), "--dry-run", "--multi-group"],
+            cli, ["process", str(tmp_dir), "--dry-run", "--from-suggested", "--multi-group"],
         )
-        # The CLI should handle dry-run + multi-group
-        assert result.exit_code == 0 or result.exit_code == 2
-        # Exit code 2 means error (expected when target dir has no FITS)
+        assert result.exit_code in (0, 2)
 
     def test_cli_auto_group_flag(self, runner: CliRunner, tmp_dir: Path):
         """--auto-group flag."""
+        write_default_suggested(tmp_dir)
         result = runner.invoke(
-            cli, ["process", str(tmp_dir), "--dry-run", "--auto-group"],
+            cli, ["process", str(tmp_dir), "--dry-run", "--from-suggested", "--auto-group"],
         )
         assert result.exit_code in (0, 2)
 
     def test_cli_merge_flag(self, runner: CliRunner, tmp_dir: Path):
         """--merge flag."""
+        write_default_suggested(tmp_dir)
         result = runner.invoke(
-            cli, ["process", str(tmp_dir), "--dry-run", "--merge"],
+            cli, ["process", str(tmp_dir), "--dry-run", "--from-suggested", "--merge"],
         )
         assert result.exit_code in (0, 2)
 
     def test_cli_no_merge_flag(self, runner: CliRunner, tmp_dir: Path):
         """--no-merge flag."""
+        write_default_suggested(tmp_dir)
         result = runner.invoke(
-            cli, ["process", str(tmp_dir), "--dry-run", "--no-merge"],
+            cli, ["process", str(tmp_dir), "--dry-run", "--from-suggested", "--no-merge"],
         )
         assert result.exit_code in (0, 2)
 
     def test_cli_weight_by_option(self, runner: CliRunner, tmp_dir: Path):
         """--weight-by option."""
+        write_default_suggested(tmp_dir)
         result = runner.invoke(
-            cli, ["process", str(tmp_dir), "--dry-run", "--weight-by", "total_exposure"],
+            cli, ["process", str(tmp_dir), "--dry-run", "--from-suggested",
+                  "--weight-by", "total_exposure"],
         )
         assert result.exit_code in (0, 2)
 
     def test_cli_merge_method_option(self, runner: CliRunner, tmp_dir: Path):
         """--merge-method option."""
+        write_default_suggested(tmp_dir)
         result = runner.invoke(
-            cli, ["process", str(tmp_dir), "--dry-run", "--merge-method", "median"],
+            cli, ["process", str(tmp_dir), "--dry-run", "--from-suggested",
+                  "--merge-method", "median"],
         )
         assert result.exit_code in (0, 2)
 
     def test_cli_dry_run_multi_group(self, runner: CliRunner, tmp_dir: Path):
         """--dry-run + --multi-group shows groups table (when dir has frames)."""
-        # Create a valid FITS in the target to pass discovery
         create_test_fits(tmp_dir / "light_0000.fits", exptime=15.0, gain=60, add_stars=True, rng_seed=1)
         create_test_fits(tmp_dir / "light_0001.fits", exptime=60.0, gain=40, add_stars=True, rng_seed=2)
         create_test_fits(tmp_dir / "dark_0000.fits", exptime=15.0, gain=60, add_stars=False, rng_seed=3)
         create_test_fits(tmp_dir / "dark_0001.fits", exptime=15.0, gain=60, add_stars=False, rng_seed=4)
-
+        write_default_suggested(tmp_dir)
         result = runner.invoke(
-            cli, ["process", str(tmp_dir), "--dry-run", "--multi-group"],
+            cli, ["process", str(tmp_dir), "--dry-run", "--from-suggested", "--multi-group"],
         )
         assert result.exit_code in (0, 2)
         if result.exit_code == 0:
-            # Should show groups
             assert "Multi-Group" in result.output or "groups" in result.output.lower()
 
     def test_cli_merge_subcommand(self, runner: CliRunner, tmp_dir: Path):
@@ -2468,7 +2486,8 @@ class TestV175AlwaysMultiGroupCli:
         """Dry-run bei 2 Gruppen → Gruppen-Tabelle + Reference/Merge-Info;
         KEIN [WARN]-Einzel-Stack-Hinweis mehr."""
         self._make_group_target(tmp_dir, exptimes=(15.0, 60.0))
-        result = runner.invoke(cli, ["process", str(tmp_dir), "--dry-run"])
+        write_default_suggested(tmp_dir)
+        result = runner.invoke(cli, ["process", str(tmp_dir), "--dry-run", "--from-suggested"])
         assert result.exit_code == 0, result.output
         assert "DRY RUN - Would process" in result.output
         assert "Multi-Group: 2 groups found" in result.output
@@ -2480,7 +2499,8 @@ class TestV175AlwaysMultiGroupCli:
         """Dry-run bei GENAU 1 Gruppe → dieselbe Tabelle wie bei N Gruppen
         (kein separater stiller Pfad mehr)."""
         self._make_group_target(tmp_dir, exptimes=(15.0,))
-        result = runner.invoke(cli, ["process", str(tmp_dir), "--dry-run"])
+        write_default_suggested(tmp_dir)
+        result = runner.invoke(cli, ["process", str(tmp_dir), "--dry-run", "--from-suggested"])
         assert result.exit_code == 0, result.output
         assert "Multi-Group: 1 groups found" in result.output
         assert "Reference group:" in result.output
@@ -2517,6 +2537,7 @@ class TestV175AlwaysMultiGroupCli:
         arch = MagicMock()
         arch.run.return_value = MagicMock(output_dir=tmp_dir, final_fits=None)
 
+        write_default_suggested(tmp_dir)
         with patch("astro_process.cli.create_discovery_agent", return_value=discovery), \
              patch("astro_process.cli.create_calibration_agent", return_value=cal), \
              patch("astro_process.cli.create_debayer_agent", return_value=deb), \
@@ -2524,7 +2545,7 @@ class TestV175AlwaysMultiGroupCli:
              patch("astro_process.cli.create_archive_agent", return_value=arch), \
              patch("astro_process.cli.logger") as mock_logger:
             result = runner.invoke(
-                cli, ["process", str(tmp_dir)] + (extra_args or [])
+                cli, ["process", str(tmp_dir), "--from-suggested"] + (extra_args or [])
             )
             for c in mock_logger.warning.call_args_list:
                 if c.args and c.args[0] == "cli.process.multi_group_flag_deprecated":
@@ -3097,7 +3118,13 @@ class TestCR001P3CrossGroupRegistration:
         mg_config = MultiGroupConfig()  # V1.6-Default: pcc_per_group=False
         pipeline = MagicMock()
         pipeline.processing_params = ProcessingParams()
-        pipeline.steps = []
+        # DEF-014-Fix: photometric_color_calibration-Step noetig damit PCC laeuft
+        pipeline.steps = [
+            PipelineStep(name="register_frames"),
+            PipelineStep(name="stack_frames"),
+            PipelineStep(name="photometric_color_calibration"),
+            PipelineStep(name="export"),
+        ]
 
         lights = context.get_lights()
         cal_result = MagicMock()
@@ -3372,10 +3399,11 @@ class TestCR001P1CliFlag:
         base_args: list[str] = []
         if config_path is not None:
             base_args += ["--config", str(config_path)]
-        base_args += ["process", str(tmp_dir), "--multi-group"]
+        base_args += ["process", str(tmp_dir), "--from-suggested", "--multi-group"]
         if cli_args:
             base_args += cli_args
 
+        write_default_suggested(tmp_dir)
         with patch("astro_process.cli.create_discovery_agent", return_value=discovery), \
              patch("astro_process.cli.create_calibration_agent", return_value=cal), \
              patch("astro_process.cli.create_debayer_agent", return_value=deb), \
@@ -4028,10 +4056,15 @@ class TestAlwaysMultiGroup:
         merge_agent=None,
         pcc_per_group: Optional[bool] = None,
         target_name: str = "",
+        with_pcc_step: bool = True,
     ) -> tuple:
         """process_multi_group mit GENAU 1 synthetischen Gruppe; register/
         stack/PCC gemockt (Muster run_multi_group_pipeline). Liefert
-        (proc_result, pcc_calls)."""
+        (proc_result, pcc_calls).
+
+        with_pcc_step: True (Default) = Preset hat photometric_color_calibration-Step
+        (DEF-014-Fix: PCC nur wenn Step im Preset). False = kein PCC-Step.
+        """
         context = make_sample_context(tmp_dir, group_count=1, frames_per_group=3)
         agent = ProcessingAgent(working_dir=tmp_dir, config=None)
         mg_kwargs: dict = {}
@@ -4041,7 +4074,16 @@ class TestAlwaysMultiGroup:
 
         pipeline = MagicMock()
         pipeline.processing_params = ProcessingParams()
-        pipeline.steps = []
+        # DEF-014-Fix: PCC-Step explizit setzen (Default: mit PCC-Step fuer PCC-Tests)
+        if with_pcc_step:
+            pipeline.steps = [
+                PipelineStep(name="register_frames"),
+                PipelineStep(name="stack_frames"),
+                PipelineStep(name="photometric_color_calibration"),
+                PipelineStep(name="export"),
+            ]
+        else:
+            pipeline.steps = []
 
         lights = context.get_lights()
         cal_result = MagicMock()

@@ -226,7 +226,7 @@ Input staging — copy conventional input folders into generated/<ts>/00_input.
 
 ### suggest
 
-V19-1.10-TARGET-ADVISOR — core logic for ``astra suggest``.
+V1.11-ENTSCHLACKUNG — core logic for ``astra suggest``.
 
 | Symbol | Kind | Description |
 | --- | --- | --- |

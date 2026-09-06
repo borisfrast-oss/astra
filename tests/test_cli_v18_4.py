@@ -2,6 +2,7 @@
 import json
 import os
 import shutil
+import sys
 import yaml
 from pathlib import Path
 
@@ -9,6 +10,9 @@ import pytest
 from click.testing import CliRunner
 from astro_process.cli import cli
 from astro_process.config.loader import DEFAULT_CONFIG
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from conftest import write_default_suggested  # noqa: E402
 
 
 def _write_fits(path: Path, exptime=30, gain=80, filter_name="L"):
@@ -150,7 +154,9 @@ def test_ac_cli_c1_preflight_shows_checks_without_pipeline(tmp_path):
     # create lights
     _write_fits(target / "lights" / "light_001.fits", exptime=30, gain=80)
     _write_fits(target / "lights" / "light_002.fits", exptime=30, gain=80)
-    result = runner.invoke(cli, ["--config", str(cfg_path), "process", str(target), "--preflight"])
+    write_default_suggested(target)
+    result = runner.invoke(cli, ["--config", str(cfg_path), "process", str(target),
+                                 "--from-suggested", "--preflight"])
     assert result.exit_code == 0, result.output
     # Should contain hot pixel / dark check output
     assert "Pre-Flight" in result.output or "Hot Pixels" in result.output
@@ -168,7 +174,9 @@ def test_ac_cli_c2_preflight_yes_starts_pipeline(tmp_path):
     target = tmp_path / "M13b"
     _write_fits(target / "lights" / "light_001.fits")
     _write_fits(target / "lights" / "light_002.fits")
-    result = runner.invoke(cli, ["--config", str(cfg_path), "process", str(target), "--preflight", "--yes", "--dry-run"])
+    write_default_suggested(target)
+    result = runner.invoke(cli, ["--config", str(cfg_path), "process", str(target),
+                                 "--from-suggested", "--preflight", "--yes", "--dry-run"])
     assert result.exit_code == 0, result.output
     assert "Pre-Flight" in result.output  # Vorbedingung: preflight lief
     # With --yes and --dry-run, after preflight it must fall through to dry-run processing.

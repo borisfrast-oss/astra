@@ -143,15 +143,21 @@ CLI_HELP_EN: dict[str, str] = {
     "Min Correlation (Default: 0.3, CFA-Smart: 0.1) [advanced]": "Min correlation (default: 0.3, CFA-Smart: 0.1) [advanced]",
     "FWHM Range als 'min,max' (Default: 1.5,5.0, CFA-Smart: 1.0,8.0) [advanced]": "FWHM range as 'min,max' (default: 1.5,5.0, CFA-Smart: 1.0,8.0) [advanced]",
      "Photometric Color Calibration aktivieren/deaktivieren (ueberschreibt Preset/Config; Default: Preset/Config gewinnt)": "Enable or disable photometric color calibration (overrides preset/config; default: preset/config wins)",
-    # SUG-1: suggest command help
-    "Suggest a preset/registration/debayer/PCC combination for TARGET.\n\n    Offline-first advisor (Header > target-cache > SIMBAD > Handbook 22):\n    the local target-cache always wins; SIMBAD is only queried on a cache\n    miss and only if the network is reachable (5s timeout, 1 query). On\n    failure it degrades to a generic 2-option fallback with a warning —\n    never a crash, always Exit 0 (see suggest.simbad_unavailable).\n\n    This command is an ADVISOR, not a decider: it never runs `process` by\n    itself and `process` never reads its output unless you pass the\n    explicit `--from-suggested <file>` flag.\n\n    Examples:\n        astra suggest M31\n        astra suggest M27 --header C:/Astra/M27/light_0001.fits\n        astra suggest C19 --json --output C:/Astra/C19/suggested.yaml\n        astra suggest M31 --output\n    ": "Suggest a preset, registration method, debayer method, and PCC settings for a target. Offline-first advisor (Header > target-cache > SIMBAD > Handbook): HEADER wins over TARGET; target-cache (stella-maintained) always wins over SIMBAD; SIMBAD only queried on cache miss if network available (5s timeout). On failure: generic fallback + warning, never crash, always Exit 0. Output writes to stdout (human-readable) or --json (machine-readable). Optional --output writes suggested_parameters to YAML/JSON file (default: C:/Astra/<Target>/suggested.yaml). This command is an ADVISOR (never runs process); process reads file only via explicit --from-suggested flag. Examples: astra suggest M31; astra suggest M27 --header C:/Astra/M27/light_0001.fits; astra suggest C19 --json --output C:/Astra/C19/suggested.yaml",
     # SUG-1 flag helps
     "Read OBJECT/FILTER/EXPTIME/TELESCOP/DET-TEMP from a local FITS header (local only, no cloud). OBJECT wins over TARGET when both are given (suggest.header_overrides_target warning).": "Read OBJECT, FILTER, EXPTIME, TELESCOP, DET-TEMP from a local FITS file header (local only, no cloud). If both --header and TARGET are given, OBJECT from the header takes precedence over TARGET.",
     "Fallback RA/DEC (decimal degrees) when TARGET/--header do not resolve a cache hit. Used only for SIMBAD lookup / labeling; suggest never plate-solves.": "Fallback right ascension and declination (RA DEC in decimal degrees) when target name or FITS OBJECT header do not resolve a cache hit. Coordinates are used only for SIMBAD lookup and result labeling; suggest never performs plate-solving.",
-    "Write suggested_parameters as YAML (default) or JSON (.json suffix). Without a path, defaults to C:/Astra/<Target>/suggested.yaml (Target-Root, next to Lights). Always overwrites (no auto-history).": "Write suggested_parameters to a file as YAML (default format) or JSON (if path ends with .json). Without a path argument, defaults to C:/Astra/<Target>/suggested.yaml in the target root (next to Lights directory). Always overwrites previous suggestions; no auto-history (use explicit timestamped filenames for history).",
     "Print the machine-readable JSON suggestion to stdout instead of the human-readable text.": "Print the machine-readable JSON suggestion to stdout (in addition to or instead of human-readable text).",
-    # SUG-5: --from-suggested flag help
-    "Load preset/registration/debayer/pcc from a suggested_parameters file (see 'astra suggest --output'). Precedence: CLI flags > file > config > preset > default; no auto-discover without this flag.": "Load preset, registration method, debayer method, and PCC settings from a suggested_parameters file (see 'astra suggest --output', default location: C:/Astra/<Target>/suggested.yaml in the target root). Precedence: CLI flags > suggested file > config > preset > defaults. Without this flag, process never reads suggested files (no auto-discover).",
+    # New helps from backy v1.11
+    "Load preset/registration/debayer/pcc from a suggested_parameters YAML/JSON file (written by 'astra suggest'). Required since v1.11 — run 'astra suggest <TARGET>' first to generate the file (default: C:/Astra/<Target>/suggested.yaml). If flag given without value, defaults to <Target>/suggested.yaml (derived from the TARGET argument). CLI flags win over file values. No auto-discover; only TARGET-arg-derived default when flag has no value.": "Load preset, registration method, debayer method, and PCC settings from a suggested_parameters YAML/JSON file (written by 'astra suggest', default C:/Astra/<Target>/suggested.yaml). Required since v1.11; run 'astra suggest <TARGET>' first to generate the file. If flag given without value, defaults to <Target>/suggested.yaml (derived from the TARGET argument). CLI flags win over file values. No auto-discover; only TARGET-arg-derived default when flag has no value.",
+    "Override the output path for the suggested_parameters file (YAML default, JSON on .json suffix). Without --output the file is always written to C:/Astra/<Target>/suggested.yaml (Target-Root, next to Lights). Always overwrites (no auto-history).": "Write suggested_parameters to a file as YAML (default format) or JSON (if path ends with .json). Without --output, always writes to default C:/Astra/<Target>/suggested.yaml (Target-Root, next to Lights directory). --output path is a pure path override. Always overwrites (1 write per suggest, no auto-history; use explicit filenames for timestamped records).",
+    "Suggest a preset/registration/debayer/PCC combination for TARGET.\n\n    Offline-first advisor (Header > target-cache > SIMBAD > Handbook 22):\n    the local target-cache always wins; SIMBAD is only queried on a cache\n    miss and only if the network is reachable (5s timeout, 1 query). On\n    cache miss + SIMBAD unreachable for an unknown target: Error Exit 2\n    (suggest.simbad_unavailable); add the entry in stella target-cache.md.\n\n    Always writes suggested.yaml to <data_root>/<Target>/suggested.yaml\n    (Target-Root) unless --output overrides the path. 'astra process'\n    requires --from-suggested (run 'astra suggest <TARGET>' first).\n\n    Examples:\n        astra suggest M31\n        astra suggest M31 --output C:/Astra/M31/suggested_20260905.yaml\n        astra suggest M27 --header C:/Astra/M27/light_0001.fits\n        astra suggest C19 --json --output C:/Astra/C19/suggested.yaml\n    ": "Suggest a preset, registration method, debayer method, and PCC settings for a target. Offline-first advisor (Header > target-cache > SIMBAD > Handbook): HEADER wins over TARGET; target-cache (stella-maintained) always wins over SIMBAD; SIMBAD only queried on cache miss if network available (5s timeout). On unknown target + cache miss + offline: Error Exit 2 `suggest.simbad_unavailable` (no file written; add entry to target-cache.md or run with known target). Always writes suggested.yaml to default location C:/Astra/<Target>/suggested.yaml or --output override. Output also writes to stdout (human-readable) or --json (machine-readable). This command is an ADVISOR; `astra process` requires `--from-suggested` flag (mandatory since v1.11). Examples: `astra suggest M31`; `astra suggest M31 --output C:/Astra/M31/suggested_20260905.yaml`; `astra suggest M27 --header C:/Astra/M27/light_0001.fits --json`",
+    "Preset override for all targets (default: from per-target suggested.yaml)": "Default preset for all targets (default: from per-target suggested.yaml)",
+    "Process all subdirectories in data root.\n\n    Each target directory must have a suggested.yaml (run 'astra suggest\n    <TARGET>' first). The per-target suggested.yaml is passed via\n    --from-suggested (Target-Root default). Missing file -> Error (ENTS-1).\n    ": "Process all subdirectories in the data root. Each target directory must have a suggested.yaml (run 'astra suggest <TARGET>' first). The per-target suggested.yaml is passed via --from-suggested (Target-Root default). Missing file → Error.",
+    # V1.11-SUBSET: --limit flag for smoke testing
+    "Limit number of light frames per group for quick smoke testing (discovery processes all groups, but uses only first N lights per group; darks, bias, flats remain complete for proper calibration). Default: no limit (process all frames). Example: --limit 5 (use first 5 lights per group; output marked as smoke_mode=true). Combination: incompatible with --resume (use --limit for fresh runs only). [English §17]": "Limit number of light frames per group for quick smoke testing (discovery processes all groups, but uses only first N lights per group; darks, bias, flats remain complete for proper calibration). Default: no limit (process all frames). Example: --limit 5 (use first 5 lights per group; output marked as smoke_mode=true). Combination: incompatible with --resume (use --limit for fresh runs only).",
+    "Limit number of light frames per group for smoke testing - applied uniformly to every target in the batch (N >= 1). See 'astra process --help' for details.": "Limit number of light frames per group for smoke testing - applied uniformly to every target in the batch (N >= 1). See 'astra process --help' for details.",
+    # Global flag
+    "Show the version and exit.": "Show the version and exit.",
 }
 
 # English summaries for source symbols rendered in architecture / feature docs.
@@ -483,7 +489,7 @@ class DocWriter:
     def write(self) -> None:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         content = "\n".join(self.lines)
-        self.output_path.write_text(content, encoding="utf-8")
+        self.output_path.write_text(content, encoding="utf-8", newline="\n")
         print(f"  [OK] Generated: {self.output_path.relative_to(REPO_ROOT)}")
 
 
@@ -849,15 +855,27 @@ def gen_cli_reference() -> None:
     writer.h2("PCC Flag — Use Cases (V19-PCC-FLAG)")
     writer.p("Precedence: **CLI `--pcc/--no-pcc` > Config `pcc.enabled` > Preset Steps > Default**. `default None` = no breaking change. Existing `--pcc-per-group/--no-pcc-per-group` stays independent (location: PCC per group vs. on merged stack).")
     writer.table(["Scenario", "Command"], [
-        ["M31 Galaxy, skip PCC (fast, avoid 6 min GAIA timeout)", "`astra process ... --preset galaxy_standard --no-pcc`"],
-        ["Star cluster, force PCC", "`astra process ... --preset star_standard --pcc`"],
-        ["Nebula, force PCC (preset has none)", "`astra process ... --preset nebula_standard --pcc`"],
-        ["Multi-Group, PCC only on merged (default)", "`astra process ... --no-pcc-per-group`"],
-        ["Multi-Group, PCC per group", "`astra process ... --pcc --pcc-per-group`"],
-        ["Config fallback (no CLI)", "`pcc.enabled: false` in `config.yaml` + no CLI flag → Preset overridden"],
+    ["M31 Galaxy, skip PCC (fast, avoid 6 min GAIA timeout)", "`astra process ... --preset galaxy_standard --no-pcc`"],
+    ["Star cluster, force PCC", "`astra process ... --preset star_standard --pcc`"],
+    ["Nebula, force PCC (preset has none)", "`astra process ... --preset nebula_standard --pcc`"],
+    ["Multi-Group, PCC only on merged (default)", "`astra process ... --no-pcc-per-group`"],
+    ["Multi-Group, PCC per group", "`astra process ... --pcc --pcc-per-group`"],
+    ["Config fallback (no CLI)", "`pcc.enabled: false` in `config.yaml` + no CLI flag → Preset overridden"],
     ])
     writer.p("Runtime mutation: `--pcc` inserts `photometric_color_calibration` after `background_extraction` (fallback: after `stack_frames`, then `len-2` before stretch/export). `--no-pcc` removes the step. Batch-safe via `copy.deepcopy` (in-memory, no file write). Log: `pcc.cli_override` with `enabled`, `preset`, `inserted_after`/`removed`. Config `pcc.enabled` is `Optional[bool]=None` (`null` = Preset wins, only explicit set via `model_fields_set` overrides).")
     writer.p("Quick debug: `astra process --help` shows `--pcc/--no-pcc` (visible) and `--pcc-per-group` (visible); CFA hidden flags are documented in `11-troubleshooting.md` (advanced).")
+
+    writer.h2("Smoke Testing (Subset Mode, V1.11-SUBSET)")
+    writer.p("For quick validation on full production data without waiting for complete processing:")
+    writer.code("astra process C:\\Astra\\M31 --from-suggested --limit 5 --dry-run", lang="bash")
+    writer.ul([
+    "Processes first 5 light frames per observation group (darks/bias/flats remain complete for proper calibration)",
+    "Marked in run-info.json: `smoke_mode=true`, `limit=5`, `frames_considered=5`, `frames_total=247` (example with 247-frame full dataset)",
+    "Useful after data migration (e.g., consolidate C:\\AstraTest into C:\\Astra) for quick smoke-test verification on real production data",
+    "Fully deterministic: repeat with same `--limit` yields identical frame selection (natural sort, deterministic order)",
+    "Incompatible with `--resume` (use `--limit` for fresh discovery + calibration runs only)",
+    "Batch-compatible: `astra batch C:\\Astra --limit 3` applies 3-frame limit uniformly to every target",
+    ])
 
     writer.write()
 
@@ -1497,7 +1515,7 @@ def generate_all() -> None:
         "config.yaml": file_hash(CONFIG_YAML),
         "core/": file_hash(SRC_DIR / "core"),
     }
-    hash_file.write_text(json.dumps(current_hashes, indent=2), encoding="utf-8")
+    hash_file.write_text(json.dumps(current_hashes, indent=2), encoding="utf-8", newline="\n")
     print(f"  [OK] Hash file written: {hash_file.relative_to(REPO_ROOT)}")
     print("Done.")
 

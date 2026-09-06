@@ -38,6 +38,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # ── Ensure src is on the path ──────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from conftest import write_default_suggested  # noqa: E402
+
 import synthetic
 
 from astro_process.agents.archive import ArchiveAgent
@@ -312,10 +314,11 @@ class TestErrorHandling:
         """
         target = tmp_path / "EmptyTarget"
         target.mkdir()
+        write_default_suggested(target)
 
         runner = CliRunner()
         with patch("astro_process.cli.logger") as mock_logger:
-            result = runner.invoke(cli, ["process", str(target)])
+            result = runner.invoke(cli, ["process", str(target), "--from-suggested"])
 
         assert result.exit_code == 2, result.output
         assert "[FAIL]" in result.output
@@ -333,9 +336,10 @@ class TestErrorHandling:
         """0 Lights im Multi-Group-Modus -> ebenfalls Exit 2 (kein ValueError-Crash)."""
         target = tmp_path / "EmptyTarget"
         target.mkdir()
+        write_default_suggested(target)
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["process", str(target), "--multi-group"])
+        result = runner.invoke(cli, ["process", str(target), "--from-suggested", "--multi-group"])
 
         assert result.exit_code == 2, result.output
         assert "[FAIL]" in result.output
@@ -344,9 +348,10 @@ class TestErrorHandling:
         """dry-run mit 0 Lights bleibt informativ (Exit 0, 'Lights: 0')."""
         target = tmp_path / "EmptyTarget"
         target.mkdir()
+        write_default_suggested(target)
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["process", str(target), "--dry-run"])
+        result = runner.invoke(cli, ["process", str(target), "--from-suggested", "--dry-run"])
 
         assert result.exit_code == 0, result.output
         assert "Lights: 0" in result.output

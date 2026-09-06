@@ -12,7 +12,7 @@
 
 | Command | Description | Flags |
 | --- | --- | --- |
-| `batch` | Process all subdirectories in the data root. | data_root, --preset, --dry-run |
+| `batch` | Process all subdirectories in the data root. Each target directory must have a suggested.yaml (run | data_root, --preset, --dry-run, --limit |
 | `config` | Manage configuration (precedence: CLI > Config > Env > Default). | - |
 | `config show` | Show the fully merged configuration (defaults + user + env). Precedence: CLI > | - |
 | `config get` | Get a single configuration value via dot-notation (e.g. data_root, | - |
@@ -50,13 +50,14 @@
 
 ## `batch`
 
-Process all subdirectories in the data root.
+Process all subdirectories in the data root. Each target directory must have a suggested.yaml (run 'astra suggest <TARGET>' first). The per-target suggested.yaml is passed via --from-suggested (Target-Root default). Missing file → Error.
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `data_root` | path | Sentinel.UNSET |  |
-| `--preset, -p` | text | star_standard | Default preset for all targets |
+| `--preset, -p` | text |  | Default preset for all targets (default: from per-target suggested.yaml) |
 | `--dry-run` | boolean | False |  |
+| `--limit` | integer |  | Limit number of light frames per group for smoke testing - applied uniformly to |
 
 ## `config`
 
@@ -250,6 +251,7 @@ Process a single target directory. The global --config/-c option must be placed 
 | `--yes` | boolean | False | With --preflight: start the pipeline immediately if checks pass |
 | `--no-calib` | boolean |  | Skip calibration phase (pre-calibrated lights). Note: lights must be CFA/2D |
 | `--from-suggested` | file |  | Load preset, registration method, debayer method, and PCC settings from a |
+| `--limit` | integer |  | Limit number of light frames per group for quick smoke testing (discovery |
 
 ## `status`
 
@@ -261,7 +263,7 @@ Show system status (disk space, recent runs, darks library, config health, queue
 
 ## `suggest`
 
-Suggest a preset, registration method, debayer method, and PCC settings for a target. Offline-first advisor (Header > target-cache > SIMBAD > Handbook): HEADER wins over TARGET; target-cache (stella-maintained) always wins over SIMBAD; SIMBAD only queried on cache miss if network available (5s timeout). On failure: generic fallback + warning, never crash, always Exit 0. Output writes to stdout (human-readable) or --json (machine-readable). Optional --output writes suggested_parameters to YAML/JSON file (default: C:/Astra/<Target>/suggested.yaml). This command is an ADVISOR (never runs process); process reads file only via explicit --from-suggested flag. Examples: astra suggest M31; astra suggest M27 --header C:/Astra/M27/light_0001.fits; astra suggest C19 --json --output
+Suggest a preset, registration method, debayer method, and PCC settings for a target. Offline-first advisor (Header > target-cache > SIMBAD > Handbook): HEADER wins over TARGET; target-cache (stella-maintained) always wins over SIMBAD; SIMBAD only queried on cache miss if network available (5s timeout). On unknown target + cache miss + offline: Error Exit 2 `suggest.simbad_unavailable` (no file written; add entry to target-cache.md or run with known target). Always writes suggested.yaml to default location C:/Astra/<Target>/suggested.yaml or --output override. Output also writes to stdout (human-readable) or --json (machine-readable). This command is an ADVISOR; `astra process` requires `--from-suggested` flag (mandatory since v1.11). Examples: `astra suggest M31`; `astra suggest M31
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -349,3 +351,18 @@ Precedence: **CLI `--pcc/--no-pcc` > Config `pcc.enabled` > Preset Steps > Defau
 Runtime mutation: `--pcc` inserts `photometric_color_calibration` after `background_extraction` (fallback: after `stack_frames`, then `len-2` before stretch/export). `--no-pcc` removes the step. Batch-safe via `copy.deepcopy` (in-memory, no file write). Log: `pcc.cli_override` with `enabled`, `preset`, `inserted_after`/`removed`. Config `pcc.enabled` is `Optional[bool]=None` (`null` = Preset wins, only explicit set via `model_fields_set` overrides).
 
 Quick debug: `astra process --help` shows `--pcc/--no-pcc` (visible) and `--pcc-per-group` (visible); CFA hidden flags are documented in `11-troubleshooting.md` (advanced).
+
+## Smoke Testing (Subset Mode, V1.11-SUBSET)
+
+For quick validation on full production data without waiting for complete processing:
+
+```bash
+astra process C:\Astra\M31 --from-suggested --limit 5 --dry-run
+```
+
+- Processes first 5 light frames per observation group (darks/bias/flats remain complete for proper calibration)
+- Marked in run-info.json: `smoke_mode=true`, `limit=5`, `frames_considered=5`, `frames_total=247` (example with 247-frame full dataset)
+- Useful after data migration (e.g., consolidate C:\AstraTest into C:\Astra) for quick smoke-test verification on real production data
+- Fully deterministic: repeat with same `--limit` yields identical frame selection (natural sort, deterministic order)
+- Incompatible with `--resume` (use `--limit` for fresh discovery + calibration runs only)
+- Batch-compatible: `astra batch C:\Astra --limit 3` applies 3-frame limit uniformly to every target

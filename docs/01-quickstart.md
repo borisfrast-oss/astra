@@ -15,7 +15,7 @@ astra --help
 
 | Command | Description |
 | --- | --- |
-| `batch` | Process all subdirectories in the data root. |
+| `batch` | Process all subdirectories in the data root. Each target directory |
 | `config` | Manage configuration (precedence: CLI > Config > Env > Default). |
 | `darks` | Manage the Darks Library (sync/list/check/import). |
 | `doctor` | Environment check: Python, dependencies, GAIA, config, disk, paths. |

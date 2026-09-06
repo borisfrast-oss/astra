@@ -1,17 +1,18 @@
-"""V19-1.10-TARGET-ADVISOR — core logic for ``astra suggest``.
+"""V1.11-ENTSCHLACKUNG — core logic for ``astra suggest``.
 
-Spec: knowledge-base/projects/astra/specs/spec-v19-target-advisor.md
-(owen, decided 2026-09-04; SUG-1..4). ``astra process --from-suggested``
-(SUG-5) lives in ``cli.py`` (precedence wiring, analog V19-PCC-FLAG) and
+Spec: knowledge-base/projects/astra/specs/spec-v1.11-entschlackung.md
+(owen, decided 2026-09-05; ENTS-1..6). ``astra process --from-suggested``
+(ENTS-3) lives in ``cli.py`` (precedence wiring, analog V19-PCC-FLAG) and
 only reads the file dict produced here (``to_file_dict``/``write_suggested_file``).
 
 Design notes (backy):
 
 - **Offline-first (hal):** ``target-cache.md`` wins always; SIMBAD
-  (``query_simbad``) is only attempted on a cache miss and any failure
-  (timeout/network/parse) degrades to the ``handbook_fallback`` source —
-  never a crash, never a ``ClickException`` (AC-SUG-4, OQ-SUG-1).
-- **No hardcoded target tree (OQ-SUG-2, AC-SUG-6):** the ``Astra-Preset``
+  (``query_simbad``) is only attempted on a cache miss. On cache miss +
+  SIMBAD failure (timeout/network/parse) for an *unknown* target:
+  ``SuggestInputError`` is raised (Exit 2, ENTS-5). Known cache-hit
+  targets remain Exit 0 even when offline (AC-ENTS-4).
+- **No hardcoded target tree (OQ-SUG-2, AC-ENTS-2):** the ``Astra-Preset``
   value is read verbatim from the (tolerant) cache-entry dict at runtime —
   there is no per-target ``if target == <name>: preset = <preset>`` rule
   anywhere for any specific object (verified by a repo-wide grep in
@@ -24,8 +25,8 @@ Design notes (backy):
   cache path is therefore an *optional* config field
   (``AppConfig.suggest.target_cache_path``, see ``config/models.py``) and
   the markdown parser (``parse_target_cache``) is tolerant — missing
-  fields/files simply degrade to the SIMBAD/handbook-fallback path
-  instead of raising.
+  fields/files simply result in a SIMBAD query (or error on unknown
+  target) instead of raising internally.
 """
 
 from __future__ import annotations
@@ -48,11 +49,12 @@ logger = structlog.get_logger(__name__)
 
 
 class SuggestInputError(Exception):
-    """Raised when neither TARGET, --header, nor --coords resolve a target.
+    """Raised when neither TARGET, --header, nor --coords resolve a target,
+    or when the target is unknown and SIMBAD is unreachable (ENTS-5).
 
     Caller (cli.py) turns this into a ``click.ClickException`` — a genuine
-    usage error, distinct from the offline/cache-miss case (AC-SUG-4),
-    which must stay Exit 0.
+    usage error (Exit 2). V1.11: also raised on cache-miss + SIMBAD offline
+    for unknown targets (``suggest.simbad_unavailable``, ENTS-5).
     """
 
 
@@ -422,49 +424,13 @@ def _build_cli(
     debayer_method: str, pcc_enabled: bool,
 ) -> str:
     pcc_flag = "--pcc" if pcc_enabled else "--no-pcc"
+    # v1.11 ENTS-3: --from-suggested (bare → OQ-ENTS-2 B Target-Root default)
+    # is required; place it right after the target so copy-paste works.
     return (
-        f'astra process "{target}" --preset {preset} '
+        f'astra process "{target}" --from-suggested --preset {preset} '
         f"--registration-method {method} --max-rotation {max_rotation:g} "
         f"--debayer-method {debayer_method} {pcc_flag}"
     )
-
-
-_FALLBACK_PRESET_PAIRS: tuple[tuple[str, bool], ...] = (
-    ("nebula_standard", True),
-    ("galaxy_standard", False),
-)
-
-
-def _build_fallback_options(
-    target: str, mount_type: str, telescope: str | None, exptime: Any,
-    debayer_method: str, citation: str,
-) -> list[dict[str, Any]]:
-    """Generic 2-option fallback (unknown target, cache miss, SIMBAD unavailable)."""
-    reg_opts = build_registration_options(mount_type, telescope, exptime)
-    primary = reg_opts[0]
-    options: list[dict[str, Any]] = []
-    for index, (preset_name, recommended) in enumerate(_FALLBACK_PRESET_PAIRS, start=1):
-        pcc_enabled = preset_name == "galaxy_standard"
-        options.append(
-            {
-                "index": index,
-                "preset": preset_name,
-                "registration_method": primary["method"],
-                "max_rotation_deg": primary["max_rotation_deg"],
-                "debayer_method": debayer_method,
-                "pcc_enabled": pcc_enabled,
-                "recommended": recommended,
-                "why": (
-                    f"{citation} \u2014 generic fallback (cache miss, SIMBAD "
-                    "unavailable; check/extend stella target-cache.md)"
-                ),
-                "cli": _build_cli(
-                    target, preset_name, primary["method"],
-                    primary["max_rotation_deg"], debayer_method, pcc_enabled,
-                ),
-            }
-        )
-    return options
 
 
 # ── Result ────────────────────────────────────────────────────────────
@@ -476,7 +442,7 @@ class SuggestResult:
     simbad_name: str
     type_slug: str
     handbook_ref: str
-    source: str  # cache | header | simbad | handbook_fallback
+    source: str  # cache | simbad (header overrides via suggest.header_overrides_target)
     cache_path: Path | None
     header: dict[str, Any]
     warnings: list[str]
@@ -492,12 +458,15 @@ def build_result(
     coords: tuple[float, float] | None = None,
     cache_path: Path | None = None,
 ) -> SuggestResult:
-    """Assemble a full suggestion (SUG-1/2/3): Header > Cache > SIMBAD > Handbook.
+    """Assemble a full suggestion (ENTS-1/2): Header > Cache > SIMBAD > Handbook.
 
-    Never raises for offline/cache-miss (AC-SUG-4) — only raises
-    ``SuggestInputError`` when TARGET/--header/--coords cannot resolve any
-    target at all (genuine usage error, turned into a ``ClickException`` by
-    the CLI command).
+    Raises ``SuggestInputError`` in two cases:
+    - TARGET/--header/--coords cannot resolve any target at all (genuine
+      usage error, turned into a ``ClickException`` by the CLI command).
+    - Cache miss + SIMBAD unreachable for an *unknown* target (ENTS-5):
+      ``suggest.simbad_unavailable`` — caller must not write a file in this
+      case (raise happens before any write).
+    Known cache-hit targets remain Exit 0 even when offline (AC-ENTS-4).
     """
     header_data: dict[str, Any] = {}
     warnings: list[str] = []
@@ -561,24 +530,31 @@ def build_result(
             astra_preset = _PRESET_BY_TYPE_SLUG.get(type_slug)
             handbook_ref = citation
         else:
-            source = "handbook_fallback"
-            warnings.append("suggest.simbad_unavailable")
-            logger.warning(
+            # ENTS-5: unknown target + SIMBAD unreachable → Error (no fallback)
+            logger.error(
                 "suggest.simbad_unavailable",
                 target=effective_target,
-                detail="Offline \u2014 cache-only, SIMBAD unreachable",
+                detail="Cache miss, SIMBAD unreachable (offline)",
             )
-            simbad_name = effective_target
-            astra_preset = None
-            type_slug, citation = "unknown", classify_and_cite("")[1]
-            handbook_ref = citation
+            raise SuggestInputError(
+                f'suggest.simbad_unavailable: unknown target "{effective_target}" '
+                f"\u2014 no cache hit, SIMBAD unreachable (offline). "
+                f"Run with a known TARGET from target-cache.md or add the entry via stella."
+            )
 
     if astra_preset is None:
-        options = _build_fallback_options(
-            effective_target, mount_type, telescope_name, exptime_hint,
-            debayer_method, citation,
+        # ENTS-5: cache entry exists but has no Astra-Preset or SIMBAD otype
+        # has no mapping → Error (no generic fallback)
+        logger.error(
+            "suggest.preset_missing",
+            target=effective_target,
+            source=source,
         )
-        top_level_preset = options[0]["preset"]
+        raise SuggestInputError(
+            f'suggest.preset_missing: no preset for target "{effective_target}" '
+            f"(cache entry without Astra-Preset or unmapped SIMBAD type) "
+            f"\u2014 add/fix the entry in stella target-cache.md."
+        )
     else:
         pcc_enabled = astra_preset == "galaxy_standard"
         reg_opts = build_registration_options(mount_type, telescope_name, exptime_hint)
@@ -633,8 +609,6 @@ def _source_line(source: str, cache_path: Path | None) -> str:
         return f"Source: cache hit ({location}) \u2014 SIMBAD not queried (offline-first)"
     if source == "simbad":
         return "Source: simbad webfetch (cache miss, network available)"
-    if source == "handbook_fallback":
-        return "Source: cache miss, simbad unavailable \u2014 offline"
     return f"Source: {source}"
 
 
@@ -824,6 +798,15 @@ def write_suggested_file(data: dict[str, Any], path: Path) -> None:
     ``astra/templates/suggested_parameters.yaml``"), falling back to a
     plain ``yaml.safe_dump`` otherwise (PyPI wheel install).
     """
+    # DEF-012 (Boris-Go): Ghost-Ordner-Guard — kein mkdir für Tippfehler-Targets.
+    # "M31" darf nicht C:\Astra\M31\ anlegen wenn C:\Astra\M31 Andromeda\ gemeint ist.
+    # User legt für neue Targets erst Ordner + lights\ an (Handbook), dann suggest.
+    target_dir = path.parent
+    if not target_dir.is_dir() or not (target_dir / "lights").is_dir():
+        raise SuggestInputError(
+            f"Target-Ordner fehlt: {target_dir} \u2014 nutze exakten Ordnernamen aus C:\\Astra "
+            f"(z.B. 'M31 Andromeda'), kein mkdir f\u00fcr neue Targets."
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.suffix.lower() == ".json":
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")

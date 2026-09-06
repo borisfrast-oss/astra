@@ -27,7 +27,9 @@ from click.testing import CliRunner
 
 # ── Ensure src is on the path ─────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from conftest import write_default_suggested  # noqa: E402
 from astro_process.cli import cli
 from astro_process.config.models import AppConfig
 from astro_process.config.loader import DEFAULT_CONFIG
@@ -119,14 +121,16 @@ class TestNoCalibFlag:
         Raw-Lights direkt zu Debayer gehen.
         """
         target = _build_light_target(tmp_path)
+        write_default_suggested(target)
         runner = CliRunner()
 
         def _fail(*args, **kwargs):
             raise AssertionError("CalibrationAgent.run darf mit --no-calib nicht laufen")
 
         with patch.object(CalibrationAgent, "run", side_effect=_fail) as mock_cal, \
-             patch.object(ProcessingAgent, "run", return_value=ProcessingResult()):
-            result = runner.invoke(cli, ["process", str(target), "--no-calib"])
+             patch.object(ProcessingAgent, "run", return_value=ProcessingResult()), \
+             patch.object(ProcessingAgent, "process_multi_group", return_value=ProcessingResult()):
+            result = runner.invoke(cli, ["process", str(target), "--from-suggested", "--no-calib"])
 
         assert result.exit_code == 0, result.output
         mock_cal.assert_not_called()
@@ -135,15 +139,18 @@ class TestNoCalibFlag:
     def test_no_calib_with_darks_not_required(self, tmp_path):
         """Target OHNE Darks/Flats/Bias + --no-calib → kein Fehler."""
         target = _build_light_target(tmp_path)
+        write_default_suggested(target)
         runner = CliRunner()
-        with patch.object(ProcessingAgent, "run", return_value=ProcessingResult()):
-            result = runner.invoke(cli, ["process", str(target), "--no-calib"])
+        with patch.object(ProcessingAgent, "run", return_value=ProcessingResult()), \
+             patch.object(ProcessingAgent, "process_multi_group", return_value=ProcessingResult()):
+            result = runner.invoke(cli, ["process", str(target), "--from-suggested", "--no-calib"])
         assert result.exit_code == 0, result.output
         assert "Calibration: skipped" in result.output
 
     def test_no_calib_flag_overrides_config(self, tmp_path):
         """CLI --calib gewinnt gegen Config no_calib: true → Calibration laeuft."""
         target = _build_light_target(tmp_path)
+        write_default_suggested(target)
         config_path = tmp_path / "config.yaml"
         data = yaml.safe_load(DEFAULT_CONFIG)
         data["no_calib"] = True
@@ -162,8 +169,10 @@ class TestNoCalibFlag:
             calibrated_lights=sorted((target / "lights").glob("light_*.fits")),
         )
         with patch.object(CalibrationAgent, "run", return_value=cal_result) as mock_cal, \
-             patch.object(ProcessingAgent, "run", return_value=ProcessingResult()):
-            result = runner.invoke(cli, ["-c", str(config_path), "process", str(target), "--calib"])
+             patch.object(ProcessingAgent, "run", return_value=ProcessingResult()), \
+             patch.object(ProcessingAgent, "process_multi_group", return_value=ProcessingResult()):
+            result = runner.invoke(cli, ["-c", str(config_path), "process", str(target),
+                                         "--from-suggested", "--calib"])
 
         assert result.exit_code == 0, result.output
         mock_cal.assert_called_once()

@@ -318,6 +318,15 @@ cfa_drizzle:
 #   min_frames: 3
 
 # V19-PCC-FLAG P3: PCC Config (optional, Default null = Preset gewinnt)
+# DEF-014 (Fix): pcc.enabled steuert den photometric_color_calibration-Preset-Step.
+# null  = Preset gewinnt (kein Override — nebula_standard laeuft ohne PCC,
+#         galaxy_standard mit PCC, jeweils wie im Preset definiert).
+# true  = PCC-Step wird in den Preset eingefuegt wenn er fehlt (alle Presets mit PCC).
+# false = PCC-Step wird aus dem Preset entfernt wenn er vorhanden ist (nie PCC).
+# WICHTIG (DEF-014): Auch im Multi-Group-Pfad wird PCC NUR ausgefuehrt wenn
+# photometric_color_calibration im Preset-Step vorhanden ist. Ein noop (z.B.
+# nebula_standard + false: Step fehlt bereits) bedeutet kein PCC — vorher
+# lief PCC trotzdem (Bug, behoben). CLI > File > Config > Preset-Default.
 # pcc:
 #   enabled: null  # null = Preset gewinnt, true = immer PCC, false = nie PCC (CLI gewinnt immer)
 #   quality_gate:
@@ -325,7 +334,7 @@ cfa_drizzle:
 #     min_factor: 0.5
 #     max_factor: 2.0
 pcc:
-  enabled: null  # null = Preset gewinnt, true = immer PCC, false = nie PCC (CLI gewinnt immer)
+  enabled: null  # null = Preset gewinnt, true = immer PCC, false = nie PCC (DEF-014)
   quality_gate:
     enabled: true
     min_factor: 0.5

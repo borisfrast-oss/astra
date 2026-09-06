@@ -25,7 +25,7 @@ from click.testing import CliRunner
 # ── Ensure src is on the path ─────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from astro_process.cli import cli, _apply_resolver_result  # noqa: E402
+from astro_process.cli import cli  # noqa: E402
 from astro_process.config import loader as config_loader  # noqa: E402
 from astro_process.config.loader import (  # noqa: E402
     DEFAULT_CONFIG,
@@ -40,6 +40,7 @@ from astro_process.config.models import (  # noqa: E402
     RegistrationConfig,
 )
 from astro_process.config.loader import resolve_registration_config  # noqa: E402
+from conftest import write_default_suggested  # noqa: E402
 
 
 def _preset(registration: RegistrationConfig | None = None) -> PipelinePreset:
@@ -453,9 +454,11 @@ class TestCliRegistrationFlag:
         Config im Preset verankert, Log `cli.process.registration` zeigt
         method=astroalign (Precedence CLI > Default)."""
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target, registration_method="astroalign")
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["process", str(target), "--dry-run", "--registration-method", "astroalign"]
+            cli, ["process", str(target), "--dry-run", "--from-suggested",
+                  "--registration-method", "astroalign"]
         )
         assert result.exit_code == 0, result.output
         assert '"method": "astroalign"' in result.output
@@ -466,6 +469,7 @@ class TestCliRegistrationFlag:
         gewinnt (CLI > Config); max_control_points aus der Config bleibt
         (nur method wird vom CLI ueberschrieben)."""
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target, registration_method="astroalign")
         cfg_path = _write_default_based_config(
             tmp_path,
             {"registration": {"method": "astroalign", "max_control_points": 10}},
@@ -474,7 +478,7 @@ class TestCliRegistrationFlag:
         result = runner.invoke(
             cli,
             ["-c", str(cfg_path), "process", str(target), "--dry-run",
-             "--registration-method", "fft"],
+             "--from-suggested", "--registration-method", "fft"],
         )
         assert result.exit_code == 0, result.output
         assert '"method": "fft"' in result.output
@@ -483,15 +487,17 @@ class TestCliRegistrationFlag:
 
     def test_config_method_applies_without_cli_flag(self, tmp_path):
         """Config registration.astroalign wirkt ohne CLI-Flag (Config-Ebene
-        erreicht die effektive Config)."""
+        erreicht die effektive Config). File liefert method=astroalign,
+        Config bestätigt — OQ-ENTS-3 A: file null → Config; hier File hat method."""
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target, registration_method="astroalign")
         cfg_path = _write_default_based_config(
             tmp_path,
             {"registration": {"method": "astroalign"}},
         )
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["-c", str(cfg_path), "process", str(target), "--dry-run"]
+            cli, ["-c", str(cfg_path), "process", str(target), "--dry-run", "--from-suggested"]
         )
         assert result.exit_code == 0, result.output
         assert '"method": "astroalign"' in result.output
@@ -502,10 +508,11 @@ class TestCliRegistrationFlag:
         max_rotation_deg 15.0; Defaults sonst unveraendert (Precedence CLI >
         Default)."""
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target, registration_method="astroalign")
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["process", str(target), "--dry-run", "--registration-method",
-                  "astroalign", "--max-rotation", "15"]
+            cli, ["process", str(target), "--dry-run", "--from-suggested",
+                  "--registration-method", "astroalign", "--max-rotation", "15"]
         )
         assert result.exit_code == 0, result.output
         assert '"max_rotation_deg": 15.0' in result.output
@@ -516,6 +523,7 @@ class TestCliRegistrationFlag:
         """Precedence e2e: Config registration.max_rotation_deg 10 + CLI
         --max-rotation 20 -> 20 gewinnt (CLI > Config)."""
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target, registration_method="astroalign")
         cfg_path = _write_default_based_config(
             tmp_path,
             {"registration": {"method": "astroalign", "max_rotation_deg": 10.0}},
@@ -524,7 +532,7 @@ class TestCliRegistrationFlag:
         result = runner.invoke(
             cli,
             ["-c", str(cfg_path), "process", str(target), "--dry-run",
-             "--registration-method", "astroalign", "--max-rotation", "20"],
+             "--from-suggested", "--registration-method", "astroalign", "--max-rotation", "20"],
         )
         assert result.exit_code == 0, result.output
         assert '"max_rotation_deg": 20.0' in result.output
@@ -540,13 +548,14 @@ class TestCliRegistrationFlag:
         auf einem Dev-Rechner in dieses Default-Verhalten hineinregieren.
         """
         target = self._create_light_target(tmp_path)
+        write_default_suggested(target, registration_method="astroalign")
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(config_loader, "_user_config_dir", lambda: tmp_path / "nouser")
         monkeypatch.setattr(config_loader, "_pipeline_root", lambda: tmp_path / "noroot")
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["process", str(target), "--dry-run", "--registration-method",
-                  "astroalign"]
+            cli, ["process", str(target), "--dry-run", "--from-suggested",
+                  "--registration-method", "astroalign"]
         )
         assert result.exit_code == 0, result.output
         assert '"max_rotation_deg": 2.0' in result.output
@@ -575,19 +584,6 @@ class TestApplyResolverResult:
         result = resolve_registration_config(AppConfig(), equipment)
         assert result["max_exptime_fft_warn"] == 30.0
 
-    def test_apply_resolver_result_propagates_fields(self):
-        """The cli helper applies method, max_rotation_deg and max_exptime_fft_warn
-        from the resolver result to the effective config."""
-        effective = RegistrationConfig()
-        resolver_result = {
-            "method": "astroalign",
-            "max_rotation_deg": 15.0,
-            "max_exptime_fft_warn": 30.0,
-        }
-        _apply_resolver_result(effective, resolver_result)
-        assert effective.method == "astroalign"
-        assert effective.max_rotation_deg == 15.0
-        assert effective.max_exptime_fft_warn == 30.0
 
 
 class TestRotationFftConfig:
@@ -652,10 +648,11 @@ class TestRotationFftConfig:
         """CLI --registration-method rotation_fft (ohne Config-Block) ->
         effektive Config im Preset verankert (Precedence CLI > Default)."""
         target = TestCliRegistrationFlag._create_light_target(tmp_path)
+        write_default_suggested(target, registration_method="rotation_fft")
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["process", str(target), "--dry-run", "--registration-method",
-                  "rotation_fft"]
+            cli, ["process", str(target), "--dry-run", "--from-suggested",
+                  "--registration-method", "rotation_fft"]
         )
         assert result.exit_code == 0, result.output
         assert '"method": "rotation_fft"' in result.output
@@ -665,6 +662,7 @@ class TestRotationFftConfig:
         """Precedence e2e: Config registration.astroalign + CLI rotation_fft ->
         rotation_fft gewinnt (CLI > Config)."""
         target = TestCliRegistrationFlag._create_light_target(tmp_path)
+        write_default_suggested(target, registration_method="astroalign")
         cfg_path = _write_default_based_config(
             tmp_path,
             {"registration": {"method": "astroalign"}},
@@ -673,7 +671,7 @@ class TestRotationFftConfig:
         result = runner.invoke(
             cli,
             ["-c", str(cfg_path), "process", str(target), "--dry-run",
-             "--registration-method", "rotation_fft"],
+             "--from-suggested", "--registration-method", "rotation_fft"],
         )
         assert result.exit_code == 0, result.output
         assert '"method": "rotation_fft"' in result.output

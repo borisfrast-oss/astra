@@ -4,3 +4,9 @@ scripts/ci.ps1 export-ignore
 Makefile export-ignore
 scripts/poc_cfa_drizzle_subpixel.py export-ignore
 scripts/manual_integration.md export-ignore
+
+# Generated docs: enforce LF line endings on all platforms
+# (generate_docs.py writes LF via newline='\n'; this ensures Git stores LF blobs
+#  regardless of core.autocrlf, so Windows-generated == Linux-generated == committed)
+docs/*.md text eol=lf
+docs/.doc_hashes.json text eol=lf

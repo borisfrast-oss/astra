@@ -31,7 +31,9 @@ from astropy.io import fits
 from click.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from conftest import write_default_suggested  # noqa: E402
 from astro_process.agents.calibration import CalibrationAgent, CalibrationResult
 from astro_process.agents.cosmetic_agent import (
     CosmeticCorrectionAgent,
@@ -497,12 +499,13 @@ class TestCosmeticCorrectionCLI:
         _write_config_cli(cfgdir / "config.yaml")
         target = tmp_path / "Target"
         target.mkdir()
+        write_default_suggested(target)
         monkeypatch.chdir(cfgdir)
 
         runner = CliRunner()
         result, captured = _invoke_process_with_cc_mock(
             runner,
-            ["process", str(target), "--no-calib", "--cosmetic-correction"],
+            ["process", str(target), "--from-suggested", "--no-calib", "--cosmetic-correction"],
             tmp_path,
         )
 
@@ -519,12 +522,13 @@ class TestCosmeticCorrectionCLI:
         })
         target = tmp_path / "Target"
         target.mkdir()
+        write_default_suggested(target)
         monkeypatch.chdir(cfgdir)
 
         runner = CliRunner()
         result, captured = _invoke_process_with_cc_mock(
             runner,
-            ["process", str(target), "--no-calib", "--no-cosmetic-correction"],
+            ["process", str(target), "--from-suggested", "--no-calib", "--no-cosmetic-correction"],
             tmp_path,
         )
 
@@ -541,12 +545,13 @@ class TestCosmeticCorrectionCLI:
         })
         target = tmp_path / "Target"
         target.mkdir()
+        write_default_suggested(target)
         monkeypatch.chdir(cfgdir)
 
         runner = CliRunner()
         result, captured = _invoke_process_with_cc_mock(
             runner,
-            ["process", str(target), "--no-calib"],
+            ["process", str(target), "--from-suggested", "--no-calib"],
             tmp_path,
         )
 
@@ -560,12 +565,13 @@ class TestCosmeticCorrectionCLI:
         _write_config_cli(cfgdir / "config.yaml")
         target = tmp_path / "Target"
         target.mkdir()
+        write_default_suggested(target)
         monkeypatch.chdir(cfgdir)
 
         runner = CliRunner()
         result, captured = _invoke_process_with_cc_mock(
             runner,
-            ["process", str(target), "--no-calib"],
+            ["process", str(target), "--from-suggested", "--no-calib"],
             tmp_path,
         )
 

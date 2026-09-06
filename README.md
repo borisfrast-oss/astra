@@ -17,6 +17,10 @@ mathematical control over every step of your image data.
 
 > **Disclaimer:** Astra is not affiliated with DwarfLab. DwarfLab is a trademark of its respective owner.
 
+## Project Status
+
+**Astra is in active development (Alpha).** Core functionality is stable and production-ready for astrophotography workflows, but features and behavior may change before v1.0 release. The CLI currently reports version 1.10.0; v1.11 and later releases are in development and not yet tagged.
+
 ## Features
 
 - **Automated Pipeline**: End-to-end processing from raw FITS to final images
@@ -80,6 +84,10 @@ astra inspect "C:\Astra\M13" --quality
 ```
 
 > Full quick-start guide: see [`docs/01-quickstart.md`](docs/01-quickstart.md).
+
+## Preview Images
+
+Example images in the repository and documentation are **quick-look previews only**. They are asinh-stretched JPG exports, often generated from smoke-test runs with limited frames (and thus noisy). Colors may be uncalibrated (e.g., green cast without photometric calibration). These previews are intended to show processing capability, not final image products. For publication-quality results, use the canonical linear FITS output with your own post-processing workflow (Lightroom, Photoshop, Pixinsight, etc.).
 
 ## Documentation
 
