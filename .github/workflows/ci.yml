@@ -42,6 +42,11 @@ jobs:
           astra doctor --help
         shell: bash
 
+      - name: Prepare config.yaml for docs check
+        run: |
+          cp config.example.yaml config.yaml
+        shell: bash
+
       - name: Docs hash check
         run: |
           python scripts/generate_docs.py check
