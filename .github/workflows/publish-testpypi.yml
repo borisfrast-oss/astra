@@ -30,7 +30,7 @@ jobs:
           twine check --strict dist/*
           ls -lh dist/
           python -m pip install --dry-run dist/*.whl
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # pinned: actions/upload-artifact v4 -> ea165f8d65b6e75b540449e92b4886f43607fa02 (2026-09-04)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # pinned: actions/upload-artifact v4 -> ea165f8d65b6e75b540449e92b4886f43607fa02 (2026-09-04)
         with:
           name: dist
           path: dist/
