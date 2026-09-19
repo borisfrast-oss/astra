@@ -10,7 +10,7 @@
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `data_root` | <class 'pathlib.Path'> | C:\Astra | Root directory for all target data (e.g. C:/Astra). |
+| `data_root` | <class 'pathlib.Path'> | C:/Astra | Root directory for all target data (e.g. C:/Astra). |
 | `working_dir` | <class 'pathlib.Path'> | working | Relative working directory for intermediate pipeline files. |
 | `output_dir` | <class 'pathlib.Path'> | output | Relative output directory for final pipeline products. |
 | `config_dir` | <class 'pathlib.Path'> | config | Relative directory for configuration files. |
@@ -164,6 +164,82 @@
 | `min_frames` | <class 'int'> | 3 | Minimum number of frames that must remain after selection. |
 
 ## config.yaml (Defaults/Presets)
+
+```yaml
+data_root: ${ASTRA_DATA_ROOT:-C:/Astra}
+working_dir: ./working
+output_dir: ./output
+config_dir: ./config
+gimp_path: ${GIMP_PATH:-gimp}
+default_preset: star_standard
+cpu_threads: 0
+gpu_acceleration: true
+keep_working: false
+quality_accept_threshold: 80
+quality_review_threshold: 60
+darks_repository: ${ASTRA_DARKS_ROOT:-C:/Astra/_darks}
+registration:
+  method: fft
+  max_control_points: null
+  max_rotation_deg: 2.0
+  max_scale_dev: 0.02
+  stack_scale_factor: 2.0
+cfa_drizzle:
+  enabled: false
+  scale: 2.0
+  pixfrac_mode: auto
+  pixfrac: 0.5
+  kernel: lanczos3
+  quality_gate:
+    mode: auto
+    rejection_enabled: true
+    thresholds:
+      fwhm:
+      - 1.5
+      - 5.0
+      snr:
+      - 10
+      - null
+      star_count:
+      - 20
+      - null
+      correlation:
+      - 0.3
+      - null
+    elongation_unusable: true
+    min_stars_cfa: 3
+  min_frames: 5
+  fallback: malvar
+equipment_profiles:
+- name: default
+  telescope: Unknown
+  aperture_mm: 0
+  focal_length_mm: 0
+  camera: Unknown
+  pixel_size_um: 3.76
+  gain: 100
+  offset: 50
+  default_temp_c: -10.0
+- name: dwarf_mini
+  telescope: Dwarf Mini
+  aperture_mm: 0
+  focal_length_mm: 150
+  camera: Dwarf Mini
+  pixel_size_um: 2.9
+  gain: 60
+  offset: 10
+  default_temp_c: 27.0
+  mount_type: az
+  preferred_registration: astroalign
+  max_rotation_deg: 15
+  max_exptime_fft_warn: 45
+- name: dwarf3
+  deprecated: true
+  alias_for: dwarf_mini
+
+```
+
+Presets defined: 3
 
 ## Precedence & ENV
 

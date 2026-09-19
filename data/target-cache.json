@@ -1,0 +1,282 @@
+[
+  {
+    "catalog_number": "52 Cyg (= HD 197912)",
+    "simbad_name": "* 52 Cyg",
+    "type": "star",
+    "ra": "20h 45m",
+    "dec": "+30° 43'",
+    "aliases": "52 Cygni, HD 197912, HR 7942, 52 Cyg"
+  },
+  {
+    "catalog_number": "B144 (= Barnard 144)",
+    "simbad_name": "Barnard 144",
+    "type": "dark_nebula",
+    "ra": "19h 58m",
+    "dec": "+35° 18'",
+    "aliases": "Fish on a Platter Nebula, LDN 857, B144"
+  },
+  {
+    "catalog_number": "C19 (= IC 5146, Caldwell 19)",
+    "simbad_name": "IC 5146",
+    "type": "nebula",
+    "ra": "21h 53m",
+    "dec": "+47° 16'",
+    "aliases": "Cocoon Nebula, Sh 2-125, LBN 424, Cr 470, C19"
+  },
+  {
+    "catalog_number": "C20 (= NGC 7000, Caldwell 20)",
+    "simbad_name": "NGC 7000",
+    "type": "nebula",
+    "ra": "20h 57m",
+    "dec": "+44° 20'",
+    "aliases": "North America Nebula, NGC 7000, Caldwell 20, C20, Nordamerika-Nebel, NA Nebula"
+  },
+  {
+    "catalog_number": "C27 (= NGC 6888, Caldwell 27)",
+    "simbad_name": "NGC 6888",
+    "type": "nebula",
+    "ra": "20h 12m",
+    "dec": "+38° 21'",
+    "aliases": "Crescent Nebula, Sh 2-105, C27"
+  },
+  {
+    "catalog_number": "HD 124897",
+    "simbad_name": "* alf Boo (Arcturus)",
+    "type": "star",
+    "ra": "14h 15m",
+    "dec": "+19° 11'",
+    "aliases": "Arcturus, α Bootis, HIP 69673, HD 124897"
+  },
+  {
+    "catalog_number": "HD 182761",
+    "simbad_name": "HD 182761",
+    "type": "star",
+    "ra": "",
+    "dec": "",
+    "aliases": "HD 182761"
+  },
+  {
+    "catalog_number": "HIP 81012",
+    "simbad_name": "BD+40 3031B",
+    "type": "star",
+    "ra": "16h 33m",
+    "dec": "+39° 59'",
+    "aliases": "BD+40 3031B, STF 2065B, CCDM J16327+3959B, HIP 81012"
+  },
+  {
+    "catalog_number": "IC 1311",
+    "simbad_name": "IC 1311",
+    "type": "open_cluster",
+    "ra": "20h 11m",
+    "dec": "+41° 11'",
+    "aliases": "OCl 173, MWSC 3271, IC 1311"
+  },
+  {
+    "catalog_number": "IC 5070",
+    "simbad_name": "IC 5070",
+    "type": "nebula",
+    "ra": "20h 51m",
+    "dec": "+44° 22'",
+    "aliases": "Pelican Nebula, LBN 350, IC 5070"
+  },
+  {
+    "catalog_number": "LDN 1235",
+    "simbad_name": "LDN 1235",
+    "type": "dark_nebula",
+    "ra": "22h 15m",
+    "dec": "+73° 25'",
+    "aliases": "Shark Nebula (Region), TGU H725 P1, LDN 1235"
+  },
+  {
+    "catalog_number": "LDN 935",
+    "simbad_name": "NAME Gulf of Mexico",
+    "type": "dark_nebula",
+    "ra": "20h 57m",
+    "dec": "+43° 52'",
+    "aliases": "Gulf of Mexico Nebula; HD 200178 (heller A2-Stern V=8,43 im Feld — alte Dwarf-Bezeichnung), LDN 935, Gulf"
+  },
+  {
+    "catalog_number": "M13 (= NGC 6205)",
+    "simbad_name": "M13",
+    "type": "globular",
+    "ra": "16h 41m",
+    "dec": "+36° 28'",
+    "aliases": "Great Hercules Cluster, NGC 6205, M13"
+  },
+  {
+    "catalog_number": "M15 (= NGC 7078)",
+    "simbad_name": "M15",
+    "type": "globular",
+    "ra": "21h 30m",
+    "dec": "+12° 10'",
+    "aliases": "NGC 7078, GCl 120, M15"
+  },
+  {
+    "catalog_number": "M27 (= NGC 6853)",
+    "simbad_name": "M27",
+    "type": "planetary",
+    "ra": "19h 59m",
+    "dec": "+22° 43'",
+    "aliases": "Dumbbell Nebula, Diabolo Nebula, NGC 6853, M27"
+  },
+  {
+    "catalog_number": "M3 (= NGC 5272)",
+    "simbad_name": "M3",
+    "type": "globular",
+    "ra": "13h 42m",
+    "dec": "+28° 23'",
+    "aliases": "NGC 5272, GCl 25, M3"
+  },
+  {
+    "catalog_number": "M31 (= NGC 224)",
+    "simbad_name": "M31",
+    "type": "galaxy",
+    "ra": "00h 42m",
+    "dec": "+41° 16'",
+    "aliases": "Andromeda Galaxy, NGC 224, M31"
+  },
+  {
+    "catalog_number": "M92 (= NGC 6341)",
+    "simbad_name": "M92",
+    "type": "globular",
+    "ra": "17h 17m",
+    "dec": "+43° 08'",
+    "aliases": "NGC 6341, GCl 59, Hercules Cluster, M92 Hercules Cluster (alter Cache-Name bis 07.09.2026), M92"
+  },
+  {
+    "catalog_number": "M51 (= NGC 5194)",
+    "simbad_name": "M51",
+    "type": "galaxy",
+    "ra": "13h 30m",
+    "dec": "+47° 12'",
+    "aliases": "Whirlpool Galaxy, NGC 5194, Arp 85, M51"
+  },
+  {
+    "catalog_number": "M57 (= NGC 6720)",
+    "simbad_name": "M57",
+    "type": "planetary",
+    "ra": "18h 54m",
+    "dec": "+33° 02'",
+    "aliases": "Ring Nebula, NGC 6720, M57"
+  },
+  {
+    "catalog_number": "M71 (= NGC 6838)",
+    "simbad_name": "M71",
+    "type": "globular",
+    "ra": "19h 54m",
+    "dec": "+18° 47'",
+    "aliases": "NGC 6838, GCl 115, M71"
+  },
+  {
+    "catalog_number": "NGC 5629",
+    "simbad_name": "NGC 5629",
+    "type": "galaxy",
+    "ra": "",
+    "dec": "",
+    "aliases": "NGC 5629"
+  },
+  {
+    "catalog_number": "NGC 6709",
+    "simbad_name": "NGC 6709",
+    "type": "open_cluster",
+    "ra": "18h 51m",
+    "dec": "+10° 20'",
+    "aliases": "OCl 100, Theia 985, MWSC 3009, NGC 6709"
+  },
+  {
+    "catalog_number": "NGC 6745",
+    "simbad_name": "NGC 6745",
+    "type": "galaxy",
+    "ra": "",
+    "dec": "",
+    "aliases": "Bird's Head Galaxy, NGC 6745"
+  },
+  {
+    "catalog_number": "NGC 6781",
+    "simbad_name": "NGC 6781",
+    "type": "planetary",
+    "ra": "",
+    "dec": "",
+    "aliases": "NGC 6781"
+  },
+  {
+    "catalog_number": "NGC 6819",
+    "simbad_name": "NGC 6819",
+    "type": "open_cluster",
+    "ra": "19h 41m",
+    "dec": "+40° 11'",
+    "aliases": "Foxhead Cluster, OCl 155, NGC 6819"
+  },
+  {
+    "catalog_number": "NGC 6823",
+    "simbad_name": "NGC 6823",
+    "type": "open_cluster",
+    "ra": "",
+    "dec": "",
+    "aliases": "NGC 6823"
+  },
+  {
+    "catalog_number": "NGC 6866",
+    "simbad_name": "NGC 6866",
+    "type": "open_cluster",
+    "ra": "20h 04m",
+    "dec": "+44° 09' (20:03:55 +44:09:00)",
+    "aliases": "Kite Cluster, NGC 6866"
+  },
+  {
+    "catalog_number": "NGC 6882",
+    "simbad_name": "NGC 6882",
+    "type": "open_cluster",
+    "ra": "20h 12m",
+    "dec": "+26° 49'",
+    "aliases": "Theia 170, NGC 6882"
+  },
+  {
+    "catalog_number": "NGC 6910",
+    "simbad_name": "NGC 6910",
+    "type": "open_cluster",
+    "ra": "20h 23m",
+    "dec": "+40° 46'",
+    "aliases": "OCl 181, C 2021+406, MWSC 3327, NGC 6910"
+  },
+  {
+    "catalog_number": "NGC 6960",
+    "simbad_name": "NGC 6960",
+    "type": "snr",
+    "ra": "20h 45m",
+    "dec": "+30° 43'",
+    "aliases": "Western Veil, Witch's Broom, Cirrus Nebula, Caldwell 34, NGC 6960, C34"
+  },
+  {
+    "catalog_number": "C33 (= NGC 6992, Caldwell 33)",
+    "simbad_name": "NGC 6992",
+    "type": "snr",
+    "ra": "20h 56m",
+    "dec": "+31° 45' (Header-verifiziert 07.09.: RA 314.0792° / Dec +31.7433°)",
+    "aliases": "Eastern Veil, Veil Nebula (Ostteil), Cirrus Nebula, Caldwell 33, C33, NGC 6992"
+  },
+  {
+    "catalog_number": "NGC 7063",
+    "simbad_name": "NGC 7063",
+    "type": "open_cluster",
+    "ra": "21h 24m",
+    "dec": "+36° 30'",
+    "aliases": "MWSC 3507, Theia 263, NGC 7063"
+  },
+  {
+    "catalog_number": "NGC 7217",
+    "simbad_name": "NGC 7217",
+    "type": "galaxy",
+    "ra": "22h 08m",
+    "dec": "+31° 22' (22:07:52 +31:21:33)",
+    "aliases": "NGC 7217"
+  },
+  {
+    "catalog_number": "—",
+    "simbad_name": "MOON",
+    "type": "moon",
+    "ra": "",
+    "dec": "",
+    "aliases": "Mond, Luna"
+  }
+]

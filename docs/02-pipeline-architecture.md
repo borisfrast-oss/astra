@@ -116,6 +116,39 @@ Gradient removal — polynomial background modelling for stacked frames.
 | `shape_str` | function | — |
 | `background_extraction` | function | Apply gradient removal to the stacked frame. |
 
+### header_utils
+
+core/header_utils.py — SSOT for FITS header annotation (V1.12-HEADER-PLATESOLVING).
+
+| Symbol | Kind | Description |
+| --- | --- | --- |
+| `effective_pixel_size_um` | function | — |
+| `build_effective_header` | function | — |
+| `annotate_fits` | function | — |
+
+### merge_filter
+
+Zentralisierte Filter-Helfer (V1.7-9, ray M5).
+
+| Symbol | Kind | Description |
+| --- | --- | --- |
+| `normalize_merge_filters` | function | — |
+| `is_merge_filter_match` | function | — |
+| `check_filter_typos` | function | — |
+
+### organize
+
+V1.12-ORGANIZE — astra organize grouping (MOVE-semantics, FITS SSOT, FILTER/EQMODE, SOLL, AZ/EQ, Moon, duplicate, exclusivity).
+
+| Symbol | Kind | Description |
+| --- | --- | --- |
+| `normalize_filter` | function | — |
+| `resolve_target_path` | function | — |
+| `resolve_group_selection` | function | — |
+| `organize_target` | function | — |
+| `organize_all_targets` | function | — |
+| `format_organize_table` | function | — |
+
 ### pcc
 
 Photometric color calibration — star detection, GAIA/VizieR catalog matching, gray-world fallback.
@@ -154,6 +187,19 @@ Auto-stretched JPG preview generation for quick visual inspection.
 | `auto_asinh` | function | — |
 | `create_preview` | function | — |
 | `create_preview_jpg` | function | Create an auto-stretched JPG preview from a linear FITS file. |
+
+### qc
+
+V1.12-QC — Quality-Checker for generated runs (Flip/Ghosting/Farbe).
+
+| Symbol | Kind | Description |
+| --- | --- | --- |
+| `detect_flip_type` | function | — |
+| `run_qc` | function | — |
+| `write_qc_report` | function | — |
+| `qc_exit_code` | function | — |
+| `discover_all_generated` | function | — |
+| `filter_non_smoke` | function | — |
 
 ### quality
 
