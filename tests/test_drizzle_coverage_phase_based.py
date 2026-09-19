@@ -107,22 +107,28 @@ def test_predict_expected_phases():
 
 
 def test_grep_markers():
-    # Ensure key strings exist for grep verification (spec requires Grep)
+    # Ensure key strings exist for grep verification (spec requires Grep).
+    # Paths are resolved relative to this test file so they work on any runner:
+    #   tests/test_drizzle_coverage_phase_based.py -> parent.parent == repo root
+    #   (monorepo: .../astra/  |  release-repo: .../<repo>/)
+    #   Both layouts have src/astro_process/... directly under that root.
     import pathlib
-    import re
-    agent_path = pathlib.Path("src/astro_process/agents/cfa_drizzle_agent.py")
-    if not agent_path.exists():
-        agent_path = pathlib.Path("C:/Users/boris/projects/astra/src/astro_process/agents/cfa_drizzle_agent.py")
+    _src = pathlib.Path(__file__).resolve().parent.parent / "src"
+
+    agent_path = _src / "astro_process" / "agents" / "cfa_drizzle_agent.py"
     text = agent_path.read_text(encoding="utf-8")
     for needle in ["low_phase_coverage", "n_distinct_phases", "weight_map", "hole_fraction_pct", "phase_stats", "shifts"]:
         assert needle in text, f"grep marker {needle} missing in cfa_drizzle_agent.py"
-    # multi_group should also contain
-    mg_path = pathlib.Path("C:/Users/boris/projects/astra/src/astro_process/agents/multi_group_agent.py")
+
+    # multi_group should also contain drizzle-related markers
+    mg_path = _src / "astro_process" / "agents" / "multi_group_agent.py"
     text2 = mg_path.read_text(encoding="utf-8")
     assert "n_distinct_phases" in text2
     assert "low_phase_coverage" in text2 or "compute_pixfrac" in text2
+
     # suggest/doctor hint
-    suggest_path = pathlib.Path("C:/Users/boris/projects/astra/src/astro_process/core/suggest.py")
+    suggest_path = _src / "astro_process" / "core" / "suggest.py"
     assert "drizzle" in suggest_path.read_text(encoding="utf-8").lower()
-    cli_path = pathlib.Path("C:/Users/boris/projects/astra/src/astro_process/cli.py")
+
+    cli_path = _src / "astro_process" / "cli.py"
     assert "drizzle" in cli_path.read_text(encoding="utf-8").lower()
