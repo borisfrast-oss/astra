@@ -39,6 +39,19 @@ Examples:
 | 60 s    | 40   | Duo-Band | `60s40_Duo-Band` |
 | 180 s   | 100  | H-Alpha  | `180s100_H-Alpha` |
 
+## Merge — Single vs. Multiple Groups
+
+**Single-group targets** (one EXPTIME/GAIN/FILTER combination) are automatically
+materialized to `merged/<Target>_merged.fits` by the process pipeline — **no merge
+step needed** and the `astra merge` subcommand is not applicable.
+
+**Multi-group targets** (>=2 groups) require the merge step: either run
+`astra process` which merges automatically (default `--merge`), or use
+`astra merge <target>` to manually merge existing group stacks.
+
+The standalone `astra merge` subcommand is useful for re-merging with different
+parameters (method, weighting, filters) without re-processing each group.
+
 ## Deprecated flags
 
 `--multi-group` and `--auto-group` are deprecated no-ops. They were kept as

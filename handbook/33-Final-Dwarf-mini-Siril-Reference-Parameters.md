@@ -189,6 +189,16 @@ Memory:
 
 ```
 
+> **Details siehe Kap.22 §17.4 Vergleichstabelle** — Superpixel vs Malvar vs CFA-Drizzle (Pixel/Sampling/Header/Erwartung/Fehlerbild M92 0.0026%).
+
+**Quick Scales — see Ch.22 §17.4 for full table:**
+
+| Method | Effective Pixel | Sampling |
+|---|---|---|
+| Superpixel | 5.8 µm | 7.98 "/px |
+| Malvar / Bilinear | 2.9 µm | 3.99 "/px |
+| Drizzle (scale 2.0) | 1.45 µm | 1.99 "/px |
+
 ---
 
 # 5.2 Calibration
@@ -298,6 +308,8 @@ Drizzle:
 off
 
 ```
+
+> **Note (V19-REG-SMART):** On AZ mounts (`dwarf_mini`) use `astroalign --max-rotation 15`; warning `registration.fft_on_az_mount` triggers vorsorglich at ≥45 s, sicher ab 60 s (stella D11 konservativ).
 
 ---
 

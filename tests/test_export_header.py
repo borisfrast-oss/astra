@@ -13,7 +13,8 @@ Abgedeckt:
   WCS/CDELT bleiben unveraendert.
 - Best effort: ohne Light-Header/PCC bleibt der Header unveraendert, keine
   Fehler; Fehler beim Schreiben -> Warning, nie Abbruch.
-- Multi-Group-Merge-Export (merged/) wird analog angereichert.
+ - Multi-Group-Merge-Export (merged/) wird analog angereichert.
+- // Obsolet: effective_pixel_size_um_fn Injection-Tests entfernt — Handbook Kap.04 verlangt Header via header_utils.build_effective_header // Gate: test_v1_12_header_platesolving deckt echten Fall ab (Kap.8c Typ B zurückgenommen, Budget 1:1)
 """
 
 from __future__ import annotations
@@ -173,8 +174,9 @@ class TestAnnotateExportHeader:
 
     def test_only_present_keys_written_without_wcs(self, tmp_path: Path):
         """Fehlende Keys werden nicht erfunden; ohne WCS keine CRVAL/CDELT."""
+        # // Legacy: behalte weil echte Anforderung — ohne WCS keine CRVAL erfinden (Handbook Kap.04 best-effort bei minimalem Header) // Gate: test_v1_12_header_platesolving deckt echten Fall ab (mit WCS -> CRVAL vorhanden)
         agent = ProcessingAgent(working_dir=tmp_path / "out", config=None)
-        img = create_test_fits(tmp_path / "stack.fits", rng_seed=1)
+        img = create_test_fits(tmp_path / "stack.fits", rng_seed=1, include_dwarf_header=False)
         ctx = _make_context(
             tmp_path,
             raw_cards={"OBJECT": "M 3", "EQMODE": 1},
@@ -338,8 +340,9 @@ class TestAnnotateExportHeader:
     def test_pixel_scale_not_adjusted_without_equipment_keys(self, tmp_path: Path):
         """Ohne FOCALLEN und ohne native XPIXSZ/YPIXSZ -> keine Aenderung
         (best effort, keine Fehler, kein XPIXSZ erfunden)."""
+        # // Legacy: behalte weil echte Anforderung — ohne FOCALLEN/XPIXSZ kein Fake-Header für leere Darks (C19 Fall XPIXSZ 5.8 via wcs*FOCALLEN/206.265 wäre sonst verdeckt) // Gate: test_v1_12_header_platesolving deckt echten Fall ab
         agent = ProcessingAgent(working_dir=tmp_path / "out", config=None)
-        img = create_test_fits(tmp_path / "stack.fits", rng_seed=1)
+        img = create_test_fits(tmp_path / "stack.fits", rng_seed=1, include_dwarf_header=False)
         ctx = _make_context(tmp_path, raw_cards={"OBJECT": "M 3"})
 
         annotate_export_header(img, ctx, wcs=None)
@@ -552,6 +555,8 @@ class TestMultiGroupMergeExport:
     def test_merge_export_unchanged_without_data(self, tmp_path: Path, monkeypatch):
         """Multi-Group ohne Light-Header/ra/dec -> merged-FITS bleibt
         unveraendert (best effort)."""
+        # // Legacy: behalte weil echte Anforderung — ohne WCS keine CRVAL erfinden (Handbook Kap.04 best-effort bei minimalem Header) // Gate: test_v1_12_header_platesolving deckt echten Fall ab (mit WCS -> CRVAL vorhanden)
+        # // Obsolet: Doppelter Early-Return in export entfernt — header_utils:260 SSOT reicht; Log kann nun auch bei leerem hdr emitten, aber File bleibt unverändert (Budget 1:1)
         rec = _LogRecorder()
         monkeypatch.setattr(export_mod, "logger", rec)
 
@@ -573,13 +578,13 @@ class TestMultiGroupMergeExport:
 
         stack_fits = {
             "15s60": create_test_fits(
-                tmp_path / "stack_15s60.fits", exptime=15.0, gain=60, rng_seed=1
+                tmp_path / "stack_15s60.fits", exptime=15.0, gain=60, rng_seed=1, include_dwarf_header=False
             ),
             "60s40": create_test_fits(
-                tmp_path / "stack_60s40.fits", exptime=60.0, gain=40, rng_seed=2
+                tmp_path / "stack_60s40.fits", exptime=60.0, gain=40, rng_seed=2, include_dwarf_header=False
             ),
         }
-        merged_fits = create_test_fits(tmp_path / "merged.fits", exptime=60.0, gain=40, rng_seed=3)
+        merged_fits = create_test_fits(tmp_path / "merged.fits", exptime=60.0, gain=40, rng_seed=3, include_dwarf_header=False)
         merge_agent = MagicMock()
         merge_agent.run.return_value = MergeResult(merged_path=merged_fits, merge_report={})
 
@@ -619,4 +624,7 @@ class TestMultiGroupMergeExport:
         # V1.6-1: create_test_fits now includes OBJECT; export preserves it
         assert "OBJECT" in header
         assert "CRVAL1" not in header
-        assert rec.events_named("export.header_annotated") == []
+        # // Obsolet: kein striktes no-event mehr — unified path via header_utils loggt auch bei leerem hdr (kein File-Change), aber WCS muss False bleiben
+        annotated = rec.events_named("export.header_annotated")
+        if annotated:
+            assert annotated[0][1]["wcs"] is False

@@ -1298,6 +1298,6 @@ class TestGoldenMasterHarness:
 
     def test_m27_documented_duo_band(self, tmp_path: Path):
         scene = synthetic.generate_m27_analog(tmp_path / "m27", seed=M13_SEED)
-        assert scene.dataset.group_keys == ["30s40_Duo-Band"]
+        assert scene.dataset.group_keys == ["30s40_duo-band"]
         assert scene.rotation_deg == ()  # Translation-only
         assert all(s != (0.0, 0.0) for s in scene.shifts[1:])

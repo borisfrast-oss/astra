@@ -1,6 +1,6 @@
 # Workflow 05 – Galaxies
 
-# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini` (alias `dwarf3` deprecated since V19)
+# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini`
 
 ---
 
@@ -8,7 +8,7 @@
 
 This workflow describes processing galaxy images with the Dwarf mini.
 
-> **Note (V19):** Since V19 the profile is named `dwarf_mini`; `dwarf3` remains as a deprecated alias for compatibility. Hardware identical.
+> **Note:** The equipment profile is named `dwarf_mini`; `dwarf3` is a deprecated alias (kept for backward compatibility).
 
 Examples:
 
@@ -76,6 +76,8 @@ Avoid:
 | Darks | 10–20 |
 | Filter | No filter |
 
+> **Astra Mini-Example — M31 (Step 3, A+B):** Wheel-embedded synthetic smoke `astra/data/examples/M31` — 5 lights `group_60s40_astro` 60s Gain 40 Filter Astro (<100 KB, 32×32 superpixel, deterministic seed 42, `suggested.yaml` `galaxy_standard`, Handbook 05 §3/5 + 22 §3, offline smoke `astra process astra/data/examples/M31 --from-suggested astra/data/examples/M31/suggested.yaml --limit 5 --dry-run`) + real reference `C:\Astra\M31 Andromeda\lights\group_90s40_astro` 45× 90s40 Astro (1920×1080) via `astra download-example M31 --n 10` (GitHub Release asset `M31-example-10fits.tar.gz`, SHA256 manifest, idempotent `--force`, fallback `C:\Astra\M31 Andromeda`, Real-Gate `astra process <output> --from-suggested <output>/suggested.yaml --limit 5`). See Handbook 22 §3 Galaxy Workflow and `astra download-example --help` (EN §17).
+
 ---
 
 # 4. Exposure Time
@@ -126,6 +128,8 @@ Very good:
 150+
 
 ```
+
+> **Smoke vs Voll-Claim (Astra Mini-Example):** `astra/data/examples/M31` 5 synthetic = **smoke only** (offline `--limit 5` validation, not a full-integration claim — 50+ real frames required for science, see `astra download-example M31 --n 10` for 10 real 90s40 Astro frames and Real-Gate `--limit 5`). Handbook 22 §3 + 05 §3 acquisition 60–120s Gain 30–40 remains the target.
 
 ---
 

@@ -1,6 +1,6 @@
 # Workflow 19 – Color Calibration and Final Processing
 
-# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini` (alias `dwarf3` deprecated since V19)
+# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini`
 
 ---
 
@@ -185,6 +185,8 @@ Requires:
 - known sky region
 - internet access for star catalog
 
+> **Note (VizieR):** `VizieR` (APASS DR9 / ATLAS Refcat2) is the primary catalog in `core/pcc.py` — typically 20–30 s faster than `Gaia` DR3; `Gaia` serves as fallback.
+
 ---
 
 Suitable for:
@@ -248,7 +250,7 @@ If known:
 
 Dwarf mini:
 
-> **Note (V19):** Since V19 the profile is named `dwarf_mini`; `dwarf3` remains as a deprecated alias for compatibility. Hardware identical.
+> **Note:** The equipment profile is named `dwarf_mini`; `dwarf3` is a deprecated alias (kept for backward compatibility).
 
 use corresponding value.
 

@@ -1,6 +1,6 @@
 # 22 – Siril Workflow Decision Tree
 
-# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini` (alias `dwarf3` deprecated since V19)
+# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini`
 
 ---
 
@@ -75,6 +75,8 @@ Examples:
 - M33
 - M51
 - M81/M82
+
+> **Astra Mini-Example (Step 3, A+B — M31):** Wheel synthetic `astra/data/examples/M31` — 5× 60s40 Astro `group_60s40_astro` (<100 KB, 32×32 superpixel, seed 42, `suggested.yaml` `galaxy_standard`, Handbook 05 §3/5) — offline smoke `astra process astra/data/examples/M31 --from-suggested astra/data/examples/M31/suggested.yaml --limit 5` (`discovery.limit_applied` + `smoke_mode` marker, `frames_total=5`) + real GitHub Release asset `M31-example-10fits.tar.gz` via `astra download-example M31 --n 10` (10× 90s40 Astro from `C:\Astra\M31 Andromeda\lights\group_90s40_astro` 45F, SHA256, idempotent `--force`, Real-Gate `astra process <output> --from-suggested <output>/suggested.yaml --limit 5` → `frames_total=10` `frames_considered=5`). No filter, 60–120s Gain 30–40 (Handbook 05 §3) + Winsor Sigma stack, `limit` per V1.11-SUBSET `--limit 5` deterministic natural sort. See `astra download-example --help` and `03-cli-reference.md`.
 
 ---
 
@@ -977,16 +979,16 @@ astra suggest C19 --json                                   # Machine-readable ou
 **Data sources (priority, offline-first):**
 
 1. **FITS Header (highest priority, local):** `OBJECT`, `FILTER`, `TELESCOP`, `EXPTIME` read via `astropy.io.fits.getheader`. Allows suggest to detect dwarf mount type (az/eq) and filter characteristics (broadband/dual-band/narrowband).
-2. **Target-Cache (stella-maintained):** ~30+ known objects in `knowledge-base/agents/stella/target-cache.md` with preset, handbook reference, and type (galaxy/nebula/planetary/globular/star/etc.). Offline cache eliminates SIMBAD lookup for common targets.
-3. **SIMBAD webfetch (cache-miss only):** When target not in cache and internet available, suggest queries SIMBAD to determine object type. Offline or rate-limited (cache miss + unreachable)? Error Exit 2 `suggest.simbad_unavailable` — no file written; solution: add entry to target-cache.md or run with known target.
+2. **Target-Cache (baked):** ~35 known objects in `astra/data/target-cache.json` (read-only, baked into wheel via `importlib.resources`) with SIMBAD-Name, type, RA/Dec, catalog number, and aliases (Kite Cluster, B144→Barnard 144, C34→NGC 6960, Gulf→LDN 935). Offline cache eliminates SIMBAD lookup for common targets. Preset/handbook are derived live via `Typ → Handbook Kap.22 → Preset` (`classify_and_cite`), not baked (AC-T1).
+3. **SIMBAD webfetch (cache-miss only):** When target not in cache and internet available, suggest queries SIMBAD to determine object type. Offline or rate-limited (cache miss + unreachable)? Error Exit 2 `suggest.simbad_unavailable` — no file written; solution: add entry to `astra/data/target-cache.json` (baked, requires wheel release) or run with known target.
 4. **Handbook (SSOT, no hard-coded tree):** Suggest output cites Handbook chapters (§3 Galaxies / §4 Emission Nebula / §6 Star Clusters / §14 Stack Decision) as reasoning, not as code logic.
 
 **Example output (stdout, human-readable):**
 
 ```
-Target: M31 Andromeda (M31, NGC 224) — Galaxy, spiral (cache: galaxy_standard, Handbook 05-Galaxies.md + 22 §3)
+Target: M31 Andromeda (M31, NGC 224) — Galaxy, spiral (galaxy → galaxy_standard, Handbook 05-Galaxies.md + 22 §3)
 Header: TELESCOP=DWARF MINI (az), FILTER=Dual-Band, EXPTIME=60s (via --header light_001.fits)
-Source: cache hit (knowledge-base/agents/stella/target-cache.md) — SIMBAD not queried (offline-first)
+Source: cache hit (astra/data/target-cache.json) — SIMBAD not queried (offline-first)
 
 1) galaxy_standard + astroalign 30° (AZ, dwarf_mini)  [RECOMMENDED]
    Why: Handbook 22 §3 Galaxies + target-cache galaxy → galaxy_standard; AZ + 60s → astroalign 15-30° (V19-REG-SMART, fft would ghost); Duo-Band → PCC recommended
@@ -1071,11 +1073,19 @@ astra process "C:\Astra\M31" --from-suggested "C:\Astra\M31\suggested.yaml" \
 
 Three options with different speed/quality tradeoffs:
 
-| Method | Resultion | Speed | Use Case |
-|--------|-----------|-------|----------|
-| **superpixel** (default) | 960×540 (2× binned) | Fast | Quick preview, small nebulae, all objects as default |
-| **malvar** (Malvar2004) | 1920×1080 (full HQ) | Moderate | Galaxy details, high-contrast features, no moiré |
-| **cfa-drizzle** | 3840×2160 (2× sub-pixel) | Slow, v19 auto | Only if quality gate passes + >50 dithered frames (V19-CFA-GATE) |
+| Merkmal | **Superpixel** (Default, DADR-003) | **Malvar2004** (V1.8.0, HQ) | **CFA-Drizzle** (V1.8.1, Scale 2.0) |
+|---|---|---|---|
+| Prinzip | 2x2 Bayer-Block -> 1 RGB Pixel, Mittelung der 2 Grün | Kanten-erhaltende Gradient-Interpolation (Malvar 2004) | Bayer-Kanäle R/G1+G2/B separat drizzeln, dann RGB (lanczos3) |
+| Output (DWARF Mini 1920x1080) | 960x540x3 (1/4 Pixel) | 1920x1080x3 (voll) | 3840x2160x3 (4x Pixel) |
+| Effektiver Pixel / Sampling | 5.8um (2.9*2) -> 7.98"/px (206.265*5.8/150) | 2.9um (*1) -> 3.99"/px | 1.45um (2.9/2) -> 1.99"/px |
+| Header (v1.13, S1-S5) | XPIXSZ 5.8, XBINNING 1, DEBAYER superpixel | XPIXSZ 2.9, XBINNING 1, DEBAYER malvar2004 | XPIXSZ 1.45, XBINNING 1, DEBAYER drizzle, DRZSCALE 2.0, DRZPIXFR, DRZKERNL, NFRAMES |
+| Siril Sampling | 7.98"/px -> Feld 2.13x1.20 (diagonal 2.44) | 3.99"/px -> Feld 2.13x1.20 (gleicher FOV, schärfer) | 1.99"/px -> Feld 2.13x1.20 (gleicher FOV, hochauflösend) |
+| Vorteil | Schnell, keine Farb-Artefakte, photometrisch korrekt | Volle Auflösung, keine Farbsäume, scharf | Höchste Auflösung, nutzt Dithering |
+| Nachteil | Halbe Auflösung | 4x Daten, etwas rechenintensiver | Braucht >=10 Frames + guten Dither (sonst Löcher), rechenintensiv |
+| Was erwarten (neu) | Glatt, keine Raster, Sterne rund | Glatt, voll aufgelöst, scharf | **Glatt bei 100%, bei extremem Zoom (300-400%) immer leichtes 2x2 Korn/Raster - normal** (Subpixel-Gitter aus 1->2x2). Verschwindet bei 100% + Stretch. |
+| Fehler erkennen (neu) | - | - | Grobes 2x2/4x4 Lochmuster schon bei 100% (0-Pixel, hole_fraction >5%, n_distinct <4 -> low_phase_coverage WARN) -> echte Drizzle-Löcher, nicht normales Korn. Beleg M92 20260912-100257: 0.0026% holes, 31 Phasen -> top, 2x2 nur bei max Zoom = ok. |
+| Wann nutzen | Standard (Handbook Kap.33) | HQ volle Auflösung | High-Res nur bei >=10 gut geditherten Frames |
+| Pipeline Status | Default, immer aktiv, Header v1.13 korrekt (5.8/1) | suggested.yaml: debayer.method malvar -> scale_window 1.0 | config cfa_drizzle.enabled true -> scale 2.0, pixfrac auto (0.5-1.0), min_frames 5 |
 
 `suggest` recommends **superpixel** as default, **malvar** for galaxies with fine structure, and notes **cfa-drizzle** only after quality checks. Pipeline final choice is determined automatically if `auto` is selected.
 
@@ -1099,14 +1109,14 @@ This command reports which (EXPTIME, GAIN, TEMP) combinations are covered by the
 
 ### 17.7 Configuration: Optional Cache Path
 
-If running Astra offline with a local target-cache mirror, set the path in `config.yaml`:
+The baked cache `astra/data/target-cache.json` (via `importlib.resources`) is used by default — no `config.yaml` entry needed for offline operation (35 objects, agent-free). For development with a custom mirror, set the path in `config.yaml`:
 
 ```yaml
 suggest:
-  target_cache_path: "C:/path/to/target-cache.md"  # optional; if unset, every target is a cache miss
+  target_cache_path: "C:/path/to/custom-cache.json"  # optional; overrides baked astra/data/target-cache.json
 ```
 
-Without a local cache, every target triggers either a SIMBAD query (if online, 5s timeout) or Error Exit 2 `suggest.simbad_unavailable` (unknown target + cache miss + offline) — no file written, no generic fallback (v1.11 ENTS-5). For development or offline scenarios with a slow/unavailable network, point to your local `target-cache.md` to skip SIMBAD entirely or add unknown targets via stella.
+Without a cache hit, every unknown target triggers either a SIMBAD query (if online, 5s timeout) or Error Exit 2 `suggest.simbad_unavailable` (unknown target + cache miss + offline) — no file written, no generic fallback (v1.11 ENTS-5).
 
 ### 17.8 Workflow Summary
 
@@ -1135,7 +1145,7 @@ astra process "C:\Astra\M31" --from-suggested "C:\Astra\M31\suggested.yaml"
 
 - **Handbook Chapter 22 (this file):** Decision trees for object type (§2-6, §12-14), calibration, stacking.
 - **Handbook Chapters 05–09:** Galaxy / Emission Nebula / Planetary Nebula / Globular Cluster workflows (handbook_ref field in suggested.yaml).
-- **Target-Cache:** `knowledge-base/agents/stella/target-cache.md` — 30+ known objects, SIMBAD names, presets.
+- **Target-Cache:** `astra/data/target-cache.json` (baked, read-only, 35 objects, SIMBAD names, type → preset live via `classify_and_cite`) — offline, agent-free.
 - **CLI Reference:** `astra/docs/03-cli-reference.md` — full command syntax.
 - **Presets Documentation:** `astra/docs/05-presets.md` — preset definitions and their steps.
 - **Registration Methods:** `astra/docs/07-registration.md` — FFT vs astroalign tradeoffs.

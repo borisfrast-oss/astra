@@ -1,14 +1,21 @@
 # Astra — Agentic Astrophotography Processing Pipeline
 
-Astra is an autonomous, **Python-native** astrophotography processing pipeline
-built for the **DWARFLab Dwarf Mini** smart telescope. It processes raw FITS
-frames through a series of specialized agents that handle calibration,
-registration, stacking, and post-processing — entirely on your own machine.
+Astra is an autonomous, **Python-native** astrophotography processing pipeline.
+It processes raw FITS frames through a series of specialized agents that handle
+calibration, registration, stacking, and post-processing — entirely on your own
+machine.
 
-In contrast to the official Dwarflab cloud, Astra runs **100% locally**
-(offline-first): your data never leaves your computer, and you keep full
-mathematical control over every step of your image data.
+In contrast to the official Dwarflab cloud, Astra runs **locally** on your
+machine (**offline-first**): your data never leaves your computer, and you keep
+full mathematical control over every step of your image data. The pipeline
+(Calibration → Debayer → Registration → Stacking → PCC → Export) runs fully
+offline. Only SIMBAD queries for target metadata (on cache miss) need internet;
+baked target cache covers common targets.
 
+- **Device-independent** — designed around standard FITS headers (V1.6
+  Device-Independence); validated on the **DWARFLab Dwarf Mini**. Feedback from
+  other devices (e.g. Dwarf 3, Seestar) welcome via
+  [GitHub Issues](https://github.com/borisfrast-oss/astra/issues).
 - **Platform-independent** — runs on Windows, macOS, and Linux
 - **No external tools required** — no Siril, GraXpert, GIMP, or PixInsight
   installation needed; everything runs in Python
@@ -19,7 +26,7 @@ mathematical control over every step of your image data.
 
 ## Project Status
 
-**Astra is in active development (Alpha).** Core functionality is stable and production-ready for astrophotography workflows, but features and behavior may change before v1.0 release. The CLI currently reports version 1.10.0; v1.11 and later releases are in development and not yet tagged.
+**Astra is in active development (Alpha).** Core functionality is stable and production-ready for astrophotography workflows, but features and behavior may change before v1.0 release. The CLI currently reports version 1.12.0 (current release). See [CHANGELOG.md](CHANGELOG.md#1120) for details.
 
 ## Features
 
@@ -28,44 +35,57 @@ mathematical control over every step of your image data.
   time, gain, and filter, processes each group independently, and merges them into
   a single calibrated result — in one command (Multi-Group is always active since
   v1.7; the old `--multi-group` flag is a deprecated no-op)
+- **Target Organization**: `astra organize` moves loose `lights/*.fits` into
+  `lights/group_*/` (header-based, filter splitting) and `astra process --group`
+  for selective group processing
 - **Debayering**: Super-Pixel (default), Bilinear, and Malvar2004 — high-quality
   demosaicing with configurable method
-- **CFA-Drizzle (optional)**: Sub-pixel drizzle on CFA raws (Scale 2.0) for
-  undersampled data, with Lanczos3 kernel and adaptive pixfrac
+- **CFA-Drizzle (optional, revived in 1.12)**: Sub-pixel drizzle on CFA raws (Scale
+  2.0) for undersampled data, with Lanczos3 kernel, phase-based pixfrac and
+  coverage diagnostics
 - **Photometric Color Calibration (PCC)**: GAIA DR3-based color calibration with
   gray-world fallback
-- **Preview/Export-Pipeline**: Background neutralization → SCNR → asinh-stretch →
-  saturation → JPG, each step optional and backward-compatible
+- **Preview/Export Pipeline**: Background neutralization → SCNR → asinh-stretch →
+  saturation → JPG/TIFF, each step optional and backward-compatible
+- **Preview Overhaul (v1.12)**: 16-bit TIFF is now the default preview (lossless,
+  GIMP/Lightroom-ready), `--preview-format tiff|jpg` (CLI > Config > Default) and
+  corrected vertical flip (right-side-up)
 - **Optional Asinh-Stretch FITS**: Additional display-stretched FITS (`_stretched`)
   for Lightroom/Photoshop users, alongside the canonical linear FITS
+- **Quality Checker**: `astra qc <generated>` validates flip, ghosting and color
+  after processing (writes `qc_report.json`, exit codes 0/2/1)
+- **Header & Platesolving**: Centralized header handling (SSOT) via `header_utils`,
+  binning-aware drizzle scale 1.45 for correct platesolving
 - **Quality Assessment**: Automated quality scoring and frame selection
 - **Reproducibility**: Complete processing logs (`agent-log.yaml`) and intermediate
   products preserved
 - **Rich CLI**: `astra init` wizard, `config`/`darks`/`target`/`status`/`doctor`
-  subcommands, `--preflight`, `inspect` extensions
+  subcommands, `--preflight`, `inspect` extensions, plus `suggest`/`organize`/`qc`
 
 ## Installation
 
 ```bash
-# Users: install from PyPI
+# Users: install from PyPI (base, FFT registration)
 pip install astra-pipeline
 
-# Contributors: editable install from source
-pip install -e .
+# With optional extras (astroalign, GraXpert, astrometry.net)
+pip install "astra-pipeline[astroalign]"     # AZ mount support (Dwarf Mini, Seestar) — recommended
+pip install "astra-pipeline[graxpert]"       # Background/gradient removal
+pip install "astra-pipeline[astro]"          # Blind plate solving
+
+# Contributors: editable install from source (includes all extras)
+pip install -e ".[dev]"
 ```
+
+The **structure_enhancement** plugin (v1.0.0) is included with all installations.
 
 ## Quick Start
 
 ```bash
-# 1) Env setup (choose one — .env file is recommended, cross-platform)
-cp .env.example .env   # edit ASTRA_DATA_ROOT, ASTRA_DARKS_REPOSITORY, GIMP_PATH
-# Windows (PowerShell, persistent): [Environment]::SetEnvironmentVariable("ASTRA_DATA_ROOT","C:\Astra","User")
-# Linux/macOS: export ASTRA_DATA_ROOT="$HOME/Astra"
-
-# 2) Init (wizard or CI)
-astra init                                    # interactive wizard
-astra init --non-interactive                   # CI: reads .env / flags, no prompts, writes config.yaml with resolved paths
-astra doctor                                  # checks env, config, disk; WARN doctor.env_missing if .env absent
+# 1) Initialize configuration (interactive wizard or CI mode)
+astra init                                    # interactive wizard: prompts for data root, darks library, preset
+astra init --non-interactive                  # CI: reads env/flags, no prompts, writes config.yaml with resolved paths
+astra doctor                                  # checks env, config, disk (read-only, no files created)
 
 # Process a single target (Multi-Group is always active)
 astra process "C:\Astra\M13" --preset star_standard
@@ -81,6 +101,9 @@ astra batch "C:\Astra"
 
 # Inspect a target (read-only FITS analysis)
 astra inspect "C:\Astra\M13" --quality
+
+# Recommended workflow (v1.11+): astra suggest → astra organize → astra process --from-suggested [--group]; verify with astra qc
+# e.g. astra suggest "C:\Astra\M13" && astra organize "C:\Astra\M13" && astra process "C:\Astra\M13" --from-suggested && astra qc "C:\Astra\M13\generated\<ts>"
 ```
 
 > Full quick-start guide: see [`docs/01-quickstart.md`](docs/01-quickstart.md).
@@ -91,12 +114,13 @@ Example images in the repository and documentation are **quick-look previews onl
 
 ## Documentation
 
-Astra ships two documentation sets:
+Documentation is available both **shipped inside the wheel** and on GitHub:
 
-| Directory | Purpose |
-|-----------|---------|
-| **`docs/`** | **Pipeline documentation (SSOT)** — how to operate the pipeline. 12 files generated from source via `scripts/generate_docs.py`. Start with `docs/01-quickstart.md`. |
-| **`handbook/`** | Dwarf mini + Siril **tutorial** — learn the astrophotography craft (Siril workflow, image acquisition). Not pipeline-operation docs. |
+| Source | Purpose |
+|--------|---------|
+| **Wheel (shipped with `pip install astra-pipeline`)** | `docs/` and `handbook/` are included in the installed package. Find them: `python -c "import astro_process; import os; print(os.path.dirname(astro_process.__file__))"` → locate `docs/` and `handbook/` subdirectories. Also accessible via `pip show -f astra-pipeline` and filtering for `docs/` and `handbook/` paths. |
+| **[GitHub `docs/`](https://github.com/borisfrast-oss/astra/tree/main/docs)** | **Pipeline documentation (SSOT)** — how to operate the pipeline. 12 files generated from source via `scripts/generate_docs.py`. Start with [`docs/01-quickstart.md`](https://github.com/borisfrast-oss/astra/blob/main/docs/01-quickstart.md). |
+| **[GitHub `handbook/`](https://github.com/borisfrast-oss/astra/tree/main/handbook)** | Dwarf mini + Siril **tutorial** — learn the astrophotography craft (Siril workflow, image acquisition). Not pipeline-operation docs. |
 
 Key `docs/` files:
 
@@ -169,7 +193,8 @@ python scripts/generate_docs.py check   # CI: fail if docs are outdated
 
 ## Support the Project
 
-Astra is free, open source, and runs **entirely offline** — it is ad-free and
+Astra is free, open source, and runs **offline-first** — the pipeline runs
+entirely locally, only SIMBAD queries (on cache miss) need internet. It is ad-free and
 never touches the cloud. Building the calibration, drizzle, and processing
 algorithms takes a lot of time (and coffee). If Astra improves your astrophotos,
 saves you from cloud dependence, or simply saves you time, a small contribution

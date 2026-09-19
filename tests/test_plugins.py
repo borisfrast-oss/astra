@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import astro_process.agents.processing_agent as processing_agent  # noqa: E402
 import astro_process.core.plugins as plugins_mod  # noqa: E402
-from astro_process.agents.processing_agent import ProcessingAgent  # noqa: E402
+from astro_process.agents.processing_agent import ProcessingAgent, ProcessingResult  # noqa: E402
 from astro_process.config.models import (  # noqa: E402
     MultiGroupConfig,
     PipelinePreset,
@@ -364,7 +364,7 @@ class TestPluginListCli:
         ):
             result = self._invoke()
         assert result.exit_code == 0
-        assert "Keine Plugins installiert" in result.output
+        assert "No plugins installed" in result.output
 
     def test_list_json_without_plugins(self):
         """AC-PL-C1: `astra plugin list --json` ohne Plugins -> Exit 0, []."""
@@ -464,6 +464,7 @@ def _run_agent(
     processing_params: ProcessingParams | None = None,
 ):
     """Minimaler run()-Aufruf (Muster test_processing_etappe2._run)."""
+    # v1.12: run() removed — migrated to _run_plugin_steps + dummy ProcessingResult (Always Multi-Group)
     agent = ProcessingAgent(working_dir=tmp_path / "out", config=None)
     context = SimpleNamespace(
         target=SimpleNamespace(name="TestTarget", ra=0.0, dec=0.0),
@@ -475,12 +476,8 @@ def _run_agent(
         steps=[PipelineStep(name=s) for s in steps],
         processing_params=processing_params or ProcessingParams(),
     )
-    return agent, agent.run(
-        context,
-        SimpleNamespace(calibrated_lights=[]),
-        SimpleNamespace(debayered_frames=[]),
-        pipeline,
-    )
+    agent._run_plugin_steps(pipeline, context)
+    return agent, ProcessingResult()
 
 
 class TestPluginInRun:

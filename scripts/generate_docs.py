@@ -23,7 +23,6 @@ import inspect
 import json
 import re
 import sys
-import unicodedata
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -34,133 +33,7 @@ DOCS_DIR = REPO_ROOT / "docs"
 CONFIG_YAML = REPO_ROOT / "config.yaml"
 DOC_DATA_DIR = Path(__file__).parent / "doc_data"
 
-# ─── Deterministic English translation maps ─────────────────────────────
-# cli.py help strings are German; the generator emits English by looking up
-# the exact German source string here. Any missing string falls back to a
-# generic English description built from the flag/command name.
-CLI_HELP_EN: dict[str, str] = {
-    # command help
-    "Process a single target directory.\n\n    Hinweis (Docs regen 2026-08-11, B3): --config/-c ist eine GLOBALE\n    Option und muss vor dem Subcommand stehen, z.B.:\n        astro-process --config config.yaml process <target>\n    Ohne --config sucht die Pipeline automatisch nach config.yaml im\n    aktuellen Verzeichnis (CWD) bzw. im Projekt-Root.\n    ": "Process a single target directory. The global --config/-c option must be placed before the subcommand, e.g. `astra --config config.yaml process <target>`. Without --config the pipeline searches for config.yaml in the current working directory or project root.",
-    "Process all subdirectories in data root.": "Process all subdirectories in the data root.",
-    "Initialize Astra configuration (Wizard).\n\n    Interaktiv fragt der Wizard nach Astra Project Dir, Data Root (C:\\Astra),\n    Darks Library (C:\\Astra\\_darks), Default Preset und Cosmetic Default\n    und schreibt config.yaml + environment.yaml (Pydantic-validiert).\n\n    Mit --non-interactive werden Flags/Env-Vars verwendet (CI-fahig), ohne Prompts.\n    Env-Vars: ASTRA_DATA_ROOT, ASTRA_DARKS_REPOSITORY, ASTRA_DEFAULT_PRESET.\n    ": "Initialize Astra configuration via an interactive wizard. The wizard asks for the project directory, data root, darks library, default preset, and cosmetic default, then writes config.yaml and environment.yaml (Pydantic-validated). With --non-interactive, flags and environment variables are used instead of prompts (CI-friendly). Env vars: ASTRA_DATA_ROOT, ASTRA_DARKS_REPOSITORY, ASTRA_DEFAULT_PRESET.",
-    "Konfiguration verwalten (Precedence CLI>Config>Env>Default).": "Manage configuration (precedence: CLI > Config > Env > Default).",
-    "Zeigt gesamte Config (merged Default+User+Env) – Precedence CLI>Config>Env>Default.": "Show the fully merged configuration (defaults + user + env). Precedence: CLI > Config > Env > Default.",
-    "Holt einzelnen Config-Wert via dot-notation (z.B. data_root, multi_group.merge.method).": "Get a single configuration value via dot-notation (e.g. data_root, multi_group.merge.method).",
-    "Setzt Config-Wert (validiert via Pydantic, invalid -> Error) und speichert config.yaml.": "Set a configuration value (validated via Pydantic; invalid values raise an error) and save config.yaml.",
-    "Setzt Key zurueck auf Default (entfernt aus config.yaml).": "Reset a key to its default and remove it from config.yaml.",
-    "TUI Wizard fuer Config (interaktiv).": "Interactive TUI configuration wizard.",
-    "Darks-Bibliothek verwalten (sync/list/check/import).": "Manage the Darks Library (sync/list/check/import).",
-    "Sync DwarfLab Export -> Darks Library (nur TELE/cam_0, kein WIDE/cam_1).": "Sync DwarfLab export into the Darks Library (TELE/cam_0 only, never WIDE/cam_1).",
-    "Listet Darks in Library.": "List dark frames in the library.",
-    "Prueft Dark-Abdeckung fuer Target.": "Check dark-frame coverage for a target.",
-    "Importiert Darks aus Pfad in Library.": "Import dark frames from a path into the library.",
-    "Target-Verwaltung (list/add/show/update/remove).": "Target management (list/add/show/update/remove).",
-    "Listet alle Targets + Fortschritt.": "List all targets and their progress.",
-    "Legt neues Target an und erzeugt AUFNAHMELISTE_{Target}.md Template.": "Create a new target and generate an AUFNAHMELISTE_{Target}.md template.",
-    "Zeigt Details zu Target.": "Show details for a target.",
-    "Aktualisiert Target (z.B. Preset in AUFNAHMELISTE).": "Update a target (e.g. preset in AUFNAHMELISTE).",
-    "Entfernt Target (optional).": "Remove a target (optional).",
-    "Zeigt System-Status (Disk, letzte Runs, Darks Library, Config Health, Queue).": "Show system status (disk space, recent runs, darks library, config health, queue).",
-    "Inspect FITS headers in target directory.\n\n    Zeigt Target-Info, Calibration-Status, Equipment, EQMODE und\n    (deprecated) shotsInfo.json-Inhalte an. Mit --json: maschinenlesbare\n    JSON-Ausgabe fuer automatisierte Nachbearbeitung.\n    ": "Inspect FITS headers in the target directory. Shows target info, calibration status, equipment, EQMODE, and deprecated shotsInfo.json contents. With --json: machine-readable JSON output for automated post-processing.",
-    "Merge vorhandene Gruppen-Stacks in ein einzelnes FITS.\n\n    Durchsucht generated/{timestamp}/group_*/04_stacked/pcc_applied.fits,\n    extrahiert Metadaten aus FITS-Headern und merged alle Gruppen mit\n    der angegebenen Methode und Gewichtung.\n    ": "Merge existing group stacks into a single FITS. Scans generated/{timestamp}/group_*/04_stacked/pcc_applied.fits, extracts metadata from FITS headers, and merges all groups using the chosen method and weighting.",
-    "Umgebungs-Check: Python, Dependencies, GAIA, Config, Disk, Pfade. Read-only.\n\n    Optional TARGET_PATH: prueft zusaetzlich die Equipment-Versorgung des\n    Targets (V1.7-4, AC-EQPT-D3) – welche Header-Werte vorhanden sind,\n    welches Config-Profil greifen wuerde und welche Felder komplett fehlen.\n\n    Exit-Codes: 0 = OK, 1 = Warnungen, 2 = kritische Fehler.\n    Der Command ist read-only – es werden KEINE Verzeichnisse/Dateien\n    angelegt oder veraendert.\n    ": "Environment check: Python, dependencies, GAIA, config, disk, paths. Read-only. Optional TARGET_PATH also checks target equipment supply (which header values are present, which config profile would apply, and which fields are completely missing). Exit codes: 0 = OK, 1 = warnings, 2 = critical errors. The command is read-only — no directories or files are created or modified.",
-    "Plugin-Verwaltung (v1.2, PL-C): Pipeline-Step-Plugins der\n    Entry-Point-Gruppe ``astra.plugins``.": "Plugin management (v1.2, PL-C): pipeline-step plugins in the ``astra.plugins`` entry-point group.",
-    "Listet registrierte Pipeline-Step-Plugins (PL-C).\n\n    Exit-Codes: 0 = OK (auch ohne installierte Plugins), 1 = Discovery-Fehler.\n    ": "List registered pipeline-step plugins (PL-C). Exit codes: 0 = OK (even with no plugins installed), 1 = discovery error.",
-    # flag help
-    "Processing preset": "Processing preset",
-    "Output directory": "Output directory",
-    "Show plan without executing": "Show plan without executing",
-    "Preserve working directory": "Preserve working directory",
-    "Gruppen-Dirs behalten/aufraeumen (Default: aus Config, sonst true)": "Keep or clean up group working directories (default from config, otherwise true)",
-    "Resume from last checkpoint": "Resume from last checkpoint",
-    "Deprecated No-op (v1.7): Multi-Group ist immer aktiv": "Deprecated no-op (v1.7): Multi-Group is always active",
-    "Merge-Schritt aktivieren/deaktivieren (Standard: aktiv)": "Enable or disable the merge step (default: enabled)",
-    "Gewichtung fuers Merge (ueberschreibt Config)": "Merge weighting method (overrides config)",
-    "Merge-Methode (ueberschreibt Config)": "Merge method (overrides config)",
-    "Filter-Auswahl fuer Merge (wiederholbar, case-insensitive getrimmt, z.B. --merge-filter Astro --merge-filter \"Duo-Band\"; ueberschreibt Config)": "Filter selection for merge (repeatable, case-insensitive trimmed, e.g. --merge-filter Astro --merge-filter \"Duo-Band\"; overrides config)",
-    "PCC pro Gruppe (Default: false = PCC auf merged Stack, max S/N)": "Apply PCC per group (default: false = PCC on merged stack for maximum S/N)",
-    "Stacking-Methode (ueberschreibt Preset/Config; sonst Mapping aus rejection; sigma_clipped_mean = robustes Sigma-Clipping)": "Stacking method (overrides preset/config; otherwise mapped from rejection; sigma_clipped_mean = robust sigma-clipping)",
-    "Registrations-Methode (ueberschreibt Config/Preset)": "Registration method (overrides config/preset)",
-    "SanityGuard: max. Rotation in Grad fuer astroalign/rotation_fft (Default 2.0, Feldrotation z.B. 15)": "Sanity guard: maximum rotation in degrees for astroalign/rotation_fft (default 2.0, e.g. 15 for field rotation)",
-    "W1-Guard: corr_hp-Schwelle (Default 0.0). fft-Zweig -> Zero-Shift Fallback; astroalign-Gewinner unter Schwelle -> Frame verwerfen": "W1 guard: corr_hp threshold (default 0.0). FFT path falls back to zero-shift; astroalign winner below threshold is rejected.",
-    "W1-Guard komplett deaktivieren (weder Zero-Shift-Fallback noch astroalign-Reject unter der Schwelle)": "Completely disable the W1 guard (no zero-shift fallback and no astroalign rejection below threshold)",
-    "EQMODE-Override: AZ-Modus erzwingen (ueberschreibt EQMODE-Header)": "EQMODE override: force AZ mode (overrides EQMODE header)",
-    "EQMODE-Override: EQ-Modus erzwingen (ueberschreibt EQMODE-Header)": "EQMODE override: force EQ mode (overrides EQMODE header)",
-    "Pixel-Skala (arcsec/px) direkt ueberschreiben (ueberschreibt Equipment-Header)": "Override pixel scale (arcsec/px) directly (overrides equipment header)",
-    "Structure-Enhancement Radius (Default 3.0 aus Preset-Step)": "Structure-enhancement radius (default 3.0 from preset step)",
-    "Structure-Enhancement Amount (Default 0.2 aus Preset-Step)": "Structure-enhancement amount (default 0.2 from preset step)",
-    "Gradient Removal aktivieren/deaktivieren (ueberschreibt Config/Preset)": "Enable or disable gradient removal (overrides config/preset)",
-    "GR-Polynom-Grad (ueberschreibt Config/Preset)": "Gradient-removal polynomial degree (overrides config/preset)",
-    "GR-Sampling-Grid als 'rows,cols' z.B. 16,16 (ueberschreibt Config/Preset)": "Gradient-removal sampling grid as 'rows,cols', e.g. 16,16 (overrides config/preset)",
-    "GR-Sigma-Clipping k in k*MAD (ueberschreibt Config/Preset)": "Gradient-removal sigma-clipping k in k*MAD (overrides config/preset)",
-    "GR-Mindest-Sample-Zellen fuer den Fit (ueberschreibt Config/Preset)": "Gradient-removal minimum sample cells for the fit (overrides config/preset)",
-    "Pfad zur zentralen Darks-Bibliothek (ueberschreibt Config: darks_repository)": "Path to the central Darks Library (overrides config: darks_repository)",
-    "Cosmetic Correction aktivieren/deaktivieren (ueberschreibt Config)": "Enable or disable cosmetic correction (overrides config)",
-    "Debayer-Methode: superpixel (Default, DADR-003) oder malvar (1920x1080, High-Quality, Malvar2004) oder bilinear (deprecated, use malvar or superpixel, volle Auflösung)": "Debayer method: superpixel (default, DADR-003), malvar (1920x1080 high-quality Malvar2004), or bilinear (deprecated; use malvar or superpixel, full resolution)",
-    "Frame-Selection (Perzentil, DwarfLab-Pattern) aktivieren/deaktivieren (ueberschreibt Config/Preset, Default aus)": "Enable or disable frame selection (percentile, DwarfLab pattern; overrides config/preset)",
-    "Keep-Perzentil fuer Frame-Selection (1-100, Default 92, nur wenn --frame-selection)": "Keep percentile for frame selection (1-100, default 92, only with --frame-selection)",
-    "CFA-Drizzle aktivieren/deaktivieren (2x, nutzt Dwarf Mini Dithering, Default aus)": "Enable or disable CFA drizzle (2x, uses Dwarf Mini dithering)",
-    "Drizzle Scale (Default 2.0, 2x = 3840x2160)": "Drizzle scale (default 2.0, 2x = 3840x2160)",
-    "Drizzle Pixfrac (0.5-1.0, bei fixed mode, Default auto: <10=1.0, 10-30=0.7, >30=0.5)": "Drizzle pixfrac (0.5-1.0; in fixed mode default auto: <10=1.0, 10-30=0.7, >30=0.5)",
-    "Drizzle Kernel (Default lanczos3, gaussian/tophat als Option)": "Drizzle kernel (default lanczos3, gaussian/tophat optional)",
-    "Nur Pre-Flight Checks (Hot Pixel Scan, Dark-Passung, Cosmetic Empfehlung) – kein Pipeline-Start": "Run pre-flight checks only (hot-pixel scan, dark matching, cosmetic recommendation) — do not start the pipeline",
-    "Bei --preflight: bei OK direkt Pipeline starten": "With --preflight: start the pipeline immediately if checks pass",
-    "Kalibrationsphase ueberspringen (vor-kalibrierte Lights). Hinweis: Lights muessen CFA/2D (Bayer-Rohdaten) sein – bereits debayerte 3D-RGB-Lights fuehren beim Debayer-Schritt zu einem Fehler.": "Skip calibration phase (pre-calibrated lights). Note: lights must be CFA/2D Bayer raw data; already-debayered 3D RGB lights will cause an error in the debayer step.",
-    "Default preset for all targets": "Default preset for all targets",
-    "Nicht-interaktiv: via Flags/Env-Vars, keine Prompts (CI-fahig)": "Non-interactive: use flags/env vars, no prompts (CI-friendly)",
-    "Astra Project Dir (Default: aktuelles Verzeichnis)": "Astra project directory (default: current directory)",
-    "Data Root (Default: C:/Astra)": "Data root (default: C:/Astra)",
-    "Darks Library (Default: C:/Astra/_darks)": "Darks library (default: C:/Astra/_darks)",
-    "Default Preset": "Default preset",
-    "Cosmetic Default aktivieren/deaktivieren": "Enable or disable cosmetic correction default",
-    "Ziel fur config.yaml (Default: ./config.yaml)": "Destination for config.yaml (default: ./config.yaml)",
-    "Maschinenlesbare Ausgabe (JSON)": "Machine-readable output (JSON)",
-    "Nur EQMODE anzeigen": "Show EQMODE only",
-    "Frames detailliert anzeigen": "Show frames in detail",
-    "QF-Metriken (Quality Foundation) anzeigen": "Show Quality Foundation metrics",
-    "Zeigt was kopiert wuerde, ohne zu kopieren": "Show what would be copied without copying",
-    "Quelle (Default: C:/Dwarflab/CALI_FRAME/dark/cam_0)": "Source (default: C:/Dwarflab/CALI_FRAME/dark/cam_0)",
-    "Ziel (Default: C:/Astra/_darks)": "Destination (default: C:/Astra/_darks)",
-    "Dry-run": "Dry-run",
-    "Preset": "Preset",
-    "Nicht-interaktiv": "Non-interactive",
-    "Neues Preset": "New preset",
-    "Ohne Rueckfrage loeschen": "Delete without confirmation",
-    "Auto-fixt fehlende Dir, Config-Defaults, Dark-Struktur": "Auto-fix missing directories, config defaults, and dark structure",
-    "Merge-Methode": "Merge method",
-    "Gewichtungsmethode": "Weighting method",
-    "Filter-Auswahl fuer Merge (wiederholbar, case-insensitive getrimmt, z.B. --merge-filter Astro)": "Filter selection for merge (repeatable, case-insensitive trimmed, e.g. --merge-filter Astro)",
-    "Output-Verzeichnis (sonst generated/{timestamp}/merged/)": "Output directory (default: generated/{timestamp}/merged/)",
-    "Gruppen anzeigen ohne zu mergen": "Show groups without merging",
-    "Config-Datei (global, muss VOR dem Subcommand stehen, z.B. --config config.yaml process <target>). Ohne --config sucht die Pipeline automatisch config.yaml im aktuellen Verzeichnis bzw. im Projekt-Root.": "Config file (global, must be placed BEFORE the subcommand, e.g. --config config.yaml process <target>). Without --config the pipeline automatically searches for config.yaml in the current directory or project root.",
-    "Verbose output": "Verbose output",
-    # V19-CFA-GATE + V19-PCC-FLAG (hidden/visible)
-    "Quality Gate fuer CFA-Drizzle: Auto (Default), AN, AUS (alle Frames durchlassen)": "Quality gate for CFA-Drizzle: auto (default), on, off (let all frames pass)",
-    "Mindest-Frames fuer Drizzle (Default: 5, CFA-Smart: 5)": "Minimum frames for drizzle (default: 5, CFA-Smart: 5)",
-    "Fallback-Methode bei Quality Gate Fail (Default: malvar) [advanced]": "Fallback method on quality-gate failure (default: malvar) [advanced]",
-    "Min Star Count (Default: 20 debayered, CFA-Smart: 1) [advanced]": "Min star count (default: 20 debayered, CFA-Smart: 1) [advanced]",
-    "Min SNR (Default: 10, CFA-Smart: 5) [advanced]": "Min SNR (default: 10, CFA-Smart: 5) [advanced]",
-    "Min Correlation (Default: 0.3, CFA-Smart: 0.1) [advanced]": "Min correlation (default: 0.3, CFA-Smart: 0.1) [advanced]",
-    "FWHM Range als 'min,max' (Default: 1.5,5.0, CFA-Smart: 1.0,8.0) [advanced]": "FWHM range as 'min,max' (default: 1.5,5.0, CFA-Smart: 1.0,8.0) [advanced]",
-     "Photometric Color Calibration aktivieren/deaktivieren (ueberschreibt Preset/Config; Default: Preset/Config gewinnt)": "Enable or disable photometric color calibration (overrides preset/config; default: preset/config wins)",
-    # SUG-1 flag helps
-    "Read OBJECT/FILTER/EXPTIME/TELESCOP/DET-TEMP from a local FITS header (local only, no cloud). OBJECT wins over TARGET when both are given (suggest.header_overrides_target warning).": "Read OBJECT, FILTER, EXPTIME, TELESCOP, DET-TEMP from a local FITS file header (local only, no cloud). If both --header and TARGET are given, OBJECT from the header takes precedence over TARGET.",
-    "Fallback RA/DEC (decimal degrees) when TARGET/--header do not resolve a cache hit. Used only for SIMBAD lookup / labeling; suggest never plate-solves.": "Fallback right ascension and declination (RA DEC in decimal degrees) when target name or FITS OBJECT header do not resolve a cache hit. Coordinates are used only for SIMBAD lookup and result labeling; suggest never performs plate-solving.",
-    "Print the machine-readable JSON suggestion to stdout instead of the human-readable text.": "Print the machine-readable JSON suggestion to stdout (in addition to or instead of human-readable text).",
-    # New helps from backy v1.11
-    "Load preset/registration/debayer/pcc from a suggested_parameters YAML/JSON file (written by 'astra suggest'). Required since v1.11 — run 'astra suggest <TARGET>' first to generate the file (default: C:/Astra/<Target>/suggested.yaml). If flag given without value, defaults to <Target>/suggested.yaml (derived from the TARGET argument). CLI flags win over file values. No auto-discover; only TARGET-arg-derived default when flag has no value.": "Load preset, registration method, debayer method, and PCC settings from a suggested_parameters YAML/JSON file (written by 'astra suggest', default C:/Astra/<Target>/suggested.yaml). Required since v1.11; run 'astra suggest <TARGET>' first to generate the file. If flag given without value, defaults to <Target>/suggested.yaml (derived from the TARGET argument). CLI flags win over file values. No auto-discover; only TARGET-arg-derived default when flag has no value.",
-    "Override the output path for the suggested_parameters file (YAML default, JSON on .json suffix). Without --output the file is always written to C:/Astra/<Target>/suggested.yaml (Target-Root, next to Lights). Always overwrites (no auto-history).": "Write suggested_parameters to a file as YAML (default format) or JSON (if path ends with .json). Without --output, always writes to default C:/Astra/<Target>/suggested.yaml (Target-Root, next to Lights directory). --output path is a pure path override. Always overwrites (1 write per suggest, no auto-history; use explicit filenames for timestamped records).",
-    "Suggest a preset/registration/debayer/PCC combination for TARGET.\n\n    Offline-first advisor (Header > target-cache > SIMBAD > Handbook 22):\n    the local target-cache always wins; SIMBAD is only queried on a cache\n    miss and only if the network is reachable (5s timeout, 1 query). On\n    cache miss + SIMBAD unreachable for an unknown target: Error Exit 2\n    (suggest.simbad_unavailable); add the entry in stella target-cache.md.\n\n    Always writes suggested.yaml to <data_root>/<Target>/suggested.yaml\n    (Target-Root) unless --output overrides the path. 'astra process'\n    requires --from-suggested (run 'astra suggest <TARGET>' first).\n\n    Examples:\n        astra suggest M31\n        astra suggest M31 --output C:/Astra/M31/suggested_20260905.yaml\n        astra suggest M27 --header C:/Astra/M27/light_0001.fits\n        astra suggest C19 --json --output C:/Astra/C19/suggested.yaml\n    ": "Suggest a preset, registration method, debayer method, and PCC settings for a target. Offline-first advisor (Header > target-cache > SIMBAD > Handbook): HEADER wins over TARGET; target-cache (stella-maintained) always wins over SIMBAD; SIMBAD only queried on cache miss if network available (5s timeout). On unknown target + cache miss + offline: Error Exit 2 `suggest.simbad_unavailable` (no file written; add entry to target-cache.md or run with known target). Always writes suggested.yaml to default location C:/Astra/<Target>/suggested.yaml or --output override. Output also writes to stdout (human-readable) or --json (machine-readable). This command is an ADVISOR; `astra process` requires `--from-suggested` flag (mandatory since v1.11). Examples: `astra suggest M31`; `astra suggest M31 --output C:/Astra/M31/suggested_20260905.yaml`; `astra suggest M27 --header C:/Astra/M27/light_0001.fits --json`",
-    "Preset override for all targets (default: from per-target suggested.yaml)": "Default preset for all targets (default: from per-target suggested.yaml)",
-    "Process all subdirectories in data root.\n\n    Each target directory must have a suggested.yaml (run 'astra suggest\n    <TARGET>' first). The per-target suggested.yaml is passed via\n    --from-suggested (Target-Root default). Missing file -> Error (ENTS-1).\n    ": "Process all subdirectories in the data root. Each target directory must have a suggested.yaml (run 'astra suggest <TARGET>' first). The per-target suggested.yaml is passed via --from-suggested (Target-Root default). Missing file → Error.",
-    # V1.11-SUBSET: --limit flag for smoke testing
-    "Limit number of light frames per group for quick smoke testing (discovery processes all groups, but uses only first N lights per group; darks, bias, flats remain complete for proper calibration). Default: no limit (process all frames). Example: --limit 5 (use first 5 lights per group; output marked as smoke_mode=true). Combination: incompatible with --resume (use --limit for fresh runs only). [English §17]": "Limit number of light frames per group for quick smoke testing (discovery processes all groups, but uses only first N lights per group; darks, bias, flats remain complete for proper calibration). Default: no limit (process all frames). Example: --limit 5 (use first 5 lights per group; output marked as smoke_mode=true). Combination: incompatible with --resume (use --limit for fresh runs only).",
-    "Limit number of light frames per group for smoke testing - applied uniformly to every target in the batch (N >= 1). See 'astra process --help' for details.": "Limit number of light frames per group for smoke testing - applied uniformly to every target in the batch (N >= 1). See 'astra process --help' for details.",
-    # Global flag
-    "Show the version and exit.": "Show the version and exit.",
-}
-
-# English summaries for source symbols rendered in architecture / feature docs.
+# ─── Symbol documentation (English) ──────────────────────────────────────
 # Key format: "module_filename.symbol_name" for functions/classes, "module_filename" for modules.
 SYMBOL_DOC_EN: dict[str, str] = {
     # modules
@@ -340,61 +213,9 @@ CONFIG_FIELD_EN: dict[str, str] = {
     "FrameSelectionConfig.keep_percentile": "Percentile of frames to keep (1-100).",
     "FrameSelectionConfig.weights": "Per-metric weights used to compute the quality score.",
      "FrameSelectionConfig.min_frames": "Minimum number of frames that must remain after selection.",
-    # SuggestConfig (V19-TARGET-ADVISOR SUG-6)
-    "SuggestConfig.target_cache_path": "Optional path to a local target-cache.md file (e.g., knowledge-base/agents/stella/target-cache.md). If not set, every target is a cache miss: suggest queries SIMBAD (if online) or falls back to generic preset advice with a warning; no crash, always Exit 0 (AC-SUG-4). Used offline to resolve target names to presets without requiring network access.",
+    # SuggestConfig (V19-TARGET-ADVISOR SUG-6 + V1.12-STEP2 T3)
+    "SuggestConfig.target_cache_path": "Optional path to the baked target-cache.json (astra/data/target-cache.json via importlib.resources, 35 objects). If not set, the baked cache is used (offline, agent-free). If file missing or target unknown, suggest queries SIMBAD (if online, 5s) or raises Exit 2 suggest.simbad_unavailable for unknown targets (ENTS-5).",
 }
-
-
-def _norm_help_key(s: str) -> str:
-    """Normalize a German help string for fuzzy, drift-tolerant lookup.
-
-    Handles mojibake replacement characters, umlaut transliteration,
-    unicode normalization, case folding and whitespace collapse so
-    source strings with encoding drift still match their map entries.
-    """
-    s = unicodedata.normalize("NFC", s)
-    # Drop U+FFFD replacement characters generated by source encoding issues.
-    s = s.replace("\ufffd", "")
-    # Transliterate umlauts to ASCII so ö/oe/ö-mojibake all collapse.
-    for a, b in (
-        ("ä", "a"), ("ö", "o"), ("ü", "u"), ("ß", "ss"),
-        ("Ä", "A"), ("Ö", "O"), ("Ü", "U"),
-    ):
-        s = s.replace(a, b)
-    # em dash / en dash -> hyphen for robustness
-    s = s.replace("\u2014", "-").replace("\u2013", "-")
-    s = s.casefold()
-    s = " ".join(s.split())
-    return s.strip()
-
-
-def _en_help(german: str, context: str = "") -> str:
-    """Return English help text for a German cli.py help string.
-
-    Warns to stderr when no translation is found, so silent German
-    bleed-through cannot ship.
-    """
-    if not german:
-        return ""
-    normalized = _norm_help_key(german)
-    if not normalized:
-        return ""
-    # Build normalized stripped-key lookup lazily (deterministic, same process).
-    if not hasattr(_en_help, "_lookup"):
-        _en_help._lookup = {  # type: ignore
-            _norm_help_key(k): v for k, v in CLI_HELP_EN.items()
-        }
-    translated = _en_help._lookup.get(normalized)  # type: ignore
-    if translated is not None:
-        return translated
-    # No translation hit -> warn loudly, then emit a genericized English fallback.
-    label = f" [{context}]" if context else ""
-    print(
-        f"[WARN] Untranslated CLI help{label}: {german[:120]!r}",
-        file=sys.stderr,
-    )
-    # Derive a useful English fallback from the first sentence / first line.
-    return german.strip()
 
 
 def _en_symbol(module: str, symbol: str) -> Optional[str]:
@@ -407,18 +228,6 @@ def _en_symbol(module: str, symbol: str) -> Optional[str]:
 def _en_module_summary(module: str) -> Optional[str]:
     """Return English summary for a module if available."""
     return SYMBOL_DOC_EN.get(module)
-
-
-def _render_default(value: object) -> str:
-    """Render a Pydantic/Click default value as a platform-neutral string.
-
-    Path objects are rendered via .as_posix() so that Windows working-trees
-    (backslash) and Linux runners (forward-slash) produce identical output.
-    All other types fall back to str().
-    """
-    if isinstance(value, Path):
-        return value.as_posix()
-    return str(value)
 
 
 def _redact_local_paths(text: str) -> str:
@@ -501,40 +310,20 @@ class DocWriter:
     def write(self) -> None:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         content = "\n".join(self.lines)
-        self.output_path.write_text(content, encoding="utf-8", newline="\n")
+        self.output_path.write_text(content, encoding="utf-8")
         print(f"  [OK] Generated: {self.output_path.relative_to(REPO_ROOT)}")
 
 
-def _read_normalised(path: Path) -> bytes:
-    """Read a file with EOL normalisation (CRLF→LF) for deterministic hashing.
-
-    Falls back to raw bytes for non-UTF-8 files (e.g. .pyc binaries), which
-    have no line-ending issues and are hashed as-is.
-    """
-    try:
-        return path.read_text(encoding="utf-8").encode("utf-8")
-    except UnicodeDecodeError:
-        return path.read_bytes()
-
-
 def file_hash(path: Path) -> str:
-    """SHA256 hash of file or directory content for change detection.
-
-    Uses EOL-normalised content (CRLF→LF via universal newlines) so that
-    Windows working-trees (autocrlf=true, CRLF) and Linux runners / ZIP-
-    expanded trees (LF) produce identical hashes.  Binary files that cannot
-    be decoded as UTF-8 are hashed from raw bytes (no EOL issue there).
-    """
+    """SHA256 hash of file or directory content for change detection."""
     if not path.exists():
         return ""
     if path.is_file():
-        return hashlib.sha256(_read_normalised(path)).hexdigest()[:16]
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
     hasher = hashlib.sha256()
     for file_path in sorted(path.rglob("*")):
-        if "__pycache__" in file_path.parts or file_path.suffix == ".pyc":
-            continue
         if file_path.is_file():
-            hasher.update(_read_normalised(file_path))
+            hasher.update(file_path.read_bytes())
     return hasher.hexdigest()[:16]
 
 
@@ -609,16 +398,13 @@ def _translate_help_dump(text: str) -> str:
                 else:
                     break
             full = "\n".join(block_lines)
-            en = _en_help(full)
-            normalized_full = _normalize_for_lookup(full)
-            if en != normalized_full:
-                first, *rest = en.split("\n")
-                out_lines.append(f"{prefix}{opts}  {first}")
-                for r in rest:
-                    if r:
-                        out_lines.append(f"{prefix}    {r}")
-                    else:
-                        out_lines.append("")
+            first, *rest = full.split("\n")
+            out_lines.append(f"{prefix}{opts}  {first}")
+            for r in rest:
+                if r:
+                    out_lines.append(f"{prefix}    {r}")
+                else:
+                    out_lines.append("")
                 i = j
                 continue
         out_lines.append(line)
@@ -677,11 +463,11 @@ def _walk_click_commands(cli_group):
             params.append({
                 "name": ", ".join(p.opts) if hasattr(p, "opts") else p.name,
                 "type": p_type,
-                "default": _redact_local_paths(_render_default(p.default)) if p.default is not None else "",
-                "help": _en_help(getattr(p, "help", "") or "", context=f"flag {p.opts}"),
+                "default": _redact_local_paths(str(p.default)) if p.default is not None else "",
+                "help": getattr(p, "help", "") or "",
                 "required": getattr(p, "required", False),
             })
-        help_text = _en_help(getattr(cmd, "help", "") or getattr(cmd, "short_help", "") or "", context=f"command {name}")
+        help_text = getattr(cmd, "help", "") or getattr(cmd, "short_help", "") or ""
         sub = {}
         if hasattr(cmd, "commands"):
             for sub_name, sub_cmd in cmd.commands.items():
@@ -698,10 +484,10 @@ def _walk_click_commands(cli_group):
                     sub_params.append({
                         "name": ", ".join(sp.opts) if hasattr(sp, "opts") else sp.name,
                         "type": st,
-                        "default": _redact_local_paths(_render_default(sp.default)) if sp.default is not None else "",
-                        "help": _en_help(getattr(sp, "help", "") or "", context=f"flag {sp.opts}"),
+                        "default": _redact_local_paths(str(sp.default)) if sp.default is not None else "",
+                        "help": getattr(sp, "help", "") or "",
                     })
-                sub[sub_name] = {"help": _en_help(getattr(sub_cmd, "help", "") or "", context=f"subcommand {sub_name}"), "params": sub_params}
+                sub[sub_name] = {"help": getattr(sub_cmd, "help", "") or "", "params": sub_params}
         commands[name] = {"help": help_text, "params": params, "subcommands": sub}
     return commands
 
@@ -739,30 +525,104 @@ def _extract_top_level_symbols(path: Path) -> list[tuple[str, str, Optional[str]
 def gen_quickstart() -> None:
     writer = DocWriter(DOCS_DIR / "01-quickstart.md")
     writer.h1("Quickstart")
-    writer.p("> Auto-generated — Template + `astra init --help`")
-    writer.p("Welcome to Astra! This guide gets you to your first stacked image in 5 minutes.")
+    writer.p("> Auto-generated from `astra init --help`, `astra download-example --help`, `astra doctor --help`")
+    writer.p("Welcome to Astra! This guide gets you to your first stacked image using **real data** (M31 Andromeda).")
     writer.h2("Installation")
     writer.code("pip install -e .\nastra --help", lang="bash")
+    writer.h2("Documentation location")
+    writer.p("Docs and handbook ship inside the wheel (run `pip show -f astra-pipeline` to locate `astro_process/docs/` with 12 files and `astro_process/handbook/` with 38 files), and are also available on GitHub: [github.com/borisfrast-oss/astra/blob/main/docs/](https://github.com/borisfrast-oss/astra/blob/main/docs/). This means you don't need to clone the repository — just start with this guide.")
+    writer.h2("Prerequisites check (recommended)")
+    writer.p("Before your first run, verify your environment:")
+    writer.code("astra doctor", lang="bash")
+    writer.p("Exit codes: 0 = OK, 1 = warnings, 2 = critical errors. Read-only — no files created.")
+    writer.h2("Fastest path: Real data example (M31 Andromeda)")
+    writer.p("Download 10 real M31 light frames (90s, Gain 40, Astro filter) and process them:")
+    writer.code(
+        "# 1. Download example dataset (idempotent, skips if exists)\nastra download-example M31 --n 10\n"
+        "#    -> Extracts to C:/Astra/M31 Andromeda/lights/group_90s40_astro/ + suggested.yaml\n\n"
+        "# 2. Dry-run to verify pipeline plan (smoke test with 5 frames)\nastra process \"C:/Astra/M31 Andromeda\" --from-suggested \"C:/Astra/M31 Andromeda/suggested.yaml\" --limit 5 --dry-run\n"
+        "#    -> discovery.limit_applied 90s40_astro original=10 selected=5 + smoke_mode true\n\n"
+        "# 3. Full run (all 10 frames)\nastra process \"C:/Astra/M31 Andromeda\" --from-suggested \"C:/Astra/M31 Andromeda/suggested.yaml\"",
+        lang="bash"
+    )
+    writer.p("Result: Stacked image in `C:/Astra/M31 Andromeda/generated/<timestamp>/merged/`")
+    writer.h2("Alternative: Your own data")
+    writer.ol([
+        "Run `astra init` (interactive wizard: Data Root, Darks Library, Preset, Cosmetic).",
+        "Copy your light frames to `C:/Astra/YourTarget/lights/`.",
+        "Organize lights: `astra organize \"C:/Astra/YourTarget\"` (groups by EXPTIME/GAIN/FILTER/EQMODE from FITS headers).",
+        "Suggest registration & processing: `astra suggest YourTarget --header <path/to/light.fits>` (creates `suggested.yaml` from FITS header).",
+        "Process: `astra process \"C:/Astra/YourTarget\" --from-suggested` (reads from default `YourTarget/suggested.yaml`).",
+        "Check result in `C:/Astra/YourTarget/generated/<timestamp>/merged/`.",
+    ])
+    writer.h2("Handbook orientation")
+    writer.p("You don't need the handbook for your first run — `suggest` picks preset and registration automatically. If you want to plan a custom session or have questions after your first processing run:")
+    writer.ul([
+        "**Decision Tree:** Handbook chapter **22** (object-type-agnostic decision flow)",
+        "**Object-specific guides:** Handbook chapters **05** (Galaxies), **08** (Planetary Nebulae), **16** (Dark Nebulae) — pick the one matching your target",
+        "**Troubleshooting:** Handbook chapter **35** if something doesn't look right",
+    ])
+    writer.p("Start with the Decision Tree, then jump to your object type.")
+    writer.h2("Top-level commands (complete)")
     try:
         sys.path.insert(0, str(REPO_ROOT / "src"))
         from astro_process.cli import cli as astra_cli
         commands = _walk_click_commands(astra_cli)
-        writer.h2("Top-level commands")
         rows = []
         for name, info in sorted(commands.items()):
-            desc = _truncate_at_word((info["help"] or "").split("\n")[0].replace("|", "/"), 70)
+            # Full description, no truncation — quickstart table should be complete
+            desc = (info["help"] or "").split("\n")[0].replace("|", "/")
             rows.append([f"`{name}`", desc or "-"])
         writer.table(["Command", "Description"], rows)
     except Exception as e:
         writer.code(f"Help extraction failed: {e}", lang="text")
-    writer.h2("First run")
-    writer.ol([
-        "Run `astra init` (wizard: Data Root, Darks Library, Preset, Cosmetic).",
-        "Add a target: `astra target add M13 --preset star_standard`.",
-        "Pre-flight: `astra process M13 --preflight` (Hot Pixel, Darks, Cosmetic).",
-        "Pipeline: `astra process C:/Astra/M13 --preset star_standard`.",
-        "Check result in `C:/Astra/M13/generated/<ts>/merged/`.",
-        "Status: `astra status --json`.",
+    writer.h2("Common flags for `astra process`")
+    writer.table(["Flag", "Purpose"], [
+        ["`--from-suggested`", "Use suggested.yaml (preset + processing_params) — reads from default `<Target>/suggested.yaml` or explicit `PATH`"],
+        ["`--preset NAME`", "Processing preset (e.g. `galaxy_standard`, `nebula_standard`, `star_standard`)"],
+        ["`--limit N`", "Process only first N frames per group (smoke test)"],
+        ["`--dry-run`", "Show plan without executing (preflight)"],
+        ["`--preflight`", "Hot pixel / darks / cosmetic check only"],
+        ["`--no-pcc`", "Skip Photometric Color Calibration (avoids GAIA timeout)"],
+        ["`--registration-method METHOD`", "Override: `fft` \\| `astroalign` \\| `rotation_fft` — use `astroalign` for AZ mounts (install optional extra: `pip install \"astra-pipeline[astroalign]\"`"],
+        ["`--config PATH`", "Global option, must precede subcommand: `astra --config config.yaml process ...`"],
+    ])
+    writer.h2("Quality check")
+    writer.p("After processing, verify image quality:")
+    writer.code(
+        "# Check latest run\nastra qc --latest\n"
+        "#    -> Reports flip, ghosting, and color balance from generated/<ts>/merged/",
+        lang="bash"
+    )
+    writer.h2("Troubleshooting")
+    writer.ul([
+        "`astra doctor` shows warnings/errors — fix those first.",
+        "`astra download-example` fails: check internet / GitHub rate limit; falls back to local copy if available.",
+        "`astra process` stuck on PCC: use `--no-pcc` (GAIA timeout), or check `astra doctor` for GAIA connectivity.",
+        "Ghosting/double stars at edges: AZ mount with long exposure — use `--registration-method astroalign --max-rotation 15` (or install optional extra: `pip install \"astra-pipeline[astroalign]\"`)",
+        "No darks found: `astra darks check \"C:/Astra/Target\"` — sync library with `astra darks sync`.",
+        "Logs: `C:/Astra/Target/generated/<timestamp>/astra.log` (structured JSON).",
+    ])
+    writer.h2("Minimal Quickstart — 5 steps (≈5 minutes, no other docs needed)")
+    writer.p("**Getting your first stack:**")
+    writer.code(
+        "① pip install astra-pipeline\n"
+        "   # Optional for AZ/drift: pip install \"astra-pipeline[astroalign]\"\n\n"
+        "② astra doctor\n"
+        "   # Exit code 1 = warnings (OK), 2 = critical errors (fix first)\n\n"
+        "③ astra download-example M31\n"
+        "   # Or: astra init → copy lights → astra organize <target> → astra suggest <target> --header <light.fits>\n\n"
+        "④ astra process \"C:/Astra/M31\" --from-suggested --limit 5\n"
+        "   # Or: astra process \"C:/Astra/YourTarget\" --from-suggested\n\n"
+        "⑤ astra qc --latest\n"
+        "   # Result in C:/Astra/*/generated/<timestamp>/merged/",
+        lang="bash"
+    )
+    writer.p("**You don't need to read anything else for your first run.** After processing:")
+    writer.ul([
+        "**Got errors?** → See `11-troubleshooting.md`",
+        "**Want to understand flags?** → See `03-cli-reference.md`",
+        "**Ready to plan a custom session?** → See handbook chapter **22** (Decision Tree) + your object type chapter",
     ])
     writer.write()
 
@@ -798,7 +658,7 @@ def gen_architecture_doc() -> None:
             rows = []
             for kind, name in public[:12]:
                 en = _en_symbol(mod.stem, name)
-                rows.append([f"`{name}`", kind, _truncate_at_word(en, 80) if en is not None else "—"])
+                rows.append([f"`{name}`", kind, en if en is not None else "—"])
             writer.table(["Symbol", "Kind", "Description"], rows)
 
     writer.h2("Key agents")
@@ -815,7 +675,7 @@ def gen_architecture_doc() -> None:
                 rows = []
                 for kind, name in public[:6]:
                     en = _en_symbol(p.stem, name)
-                    rows.append([f"`{name}`", kind, _truncate_at_word(en, 80) if en is not None else "—"])
+                    rows.append([f"`{name}`", kind, en if en is not None else "—"])
                 writer.table(["Symbol", "Kind", "Description"], rows)
 
     writer.write()
@@ -836,11 +696,11 @@ def gen_cli_reference() -> None:
         writer.h2("Subcommands")
         rows = []
         for name, info in sorted(commands.items()):
-            desc = _truncate_at_word((info["help"] or "").split("\n")[0].replace("|", "/"), 100)
+            desc = (info["help"] or "").split("\n")[0].replace("|", "/")
             flag_str = ", ".join([p["name"].split(",")[0].strip() for p in info["params"][:4]])
             rows.append([f"`{name}`", desc or "-", flag_str or "-"])
             for sub_name, sub_info in info.get("subcommands", {}).items():
-                sdesc = _truncate_at_word((sub_info["help"] or "").split("\n")[0].replace("|", "/"), 80)
+                sdesc = (sub_info["help"] or "").split("\n")[0].replace("|", "/")
                 rows.append([f"`{name} {sub_name}`", sdesc or "-", "-"])
         writer.table(["Command", "Description", "Flags"], rows)
 
@@ -854,24 +714,26 @@ def gen_cli_reference() -> None:
                 grows.append([
                     f"`{pname}`",
                     ptype,
-                    _redact_local_paths(_render_default(p.default)) if p.default is not None else "",
-                    _truncate_at_word(_en_help((getattr(p, "help", "") or ""), context=f"global flag {pname}"), 80),
+                    _redact_local_paths(str(p.default)) if p.default is not None else "",
+                    getattr(p, "help", "") or "",
                 ])
             writer.table(["Flag", "Type", "Default", "Description"], grows)
 
         for name, info in sorted(commands.items()):
             writer.h2(f"`{name}`")
             if info["help"]:
-                writer.p(_truncate_at_word(info["help"], 800))
+                writer.p(info["help"])
             if info["params"]:
-                rows = [[f"`{p['name']}`", p["type"], _redact_local_paths(p["default"])[:60], _truncate_at_word(p["help"], 80)] for p in info["params"]]
+                rows = [[f"`{p['name']}`", p["type"], p["default"], 
+                        p["help"]] for p in info["params"]]
                 writer.table(["Flag", "Type", "Default", "Description"], rows)
             for sub_name, sub_info in info.get("subcommands", {}).items():
                 writer.h3(f"`{name} {sub_name}`")
                 if sub_info["help"]:
-                    writer.p(_truncate_at_word(sub_info["help"], 800))
+                    writer.p(sub_info["help"])
                 if sub_info["params"]:
-                    rows = [[f"`{p['name']}`", p["type"], _redact_local_paths(p["default"])[:60], _truncate_at_word(p["help"], 80)] for p in sub_info["params"]]
+                    rows = [[f"`{p['name']}`", p["type"], p["default"], 
+                            p["help"]] for p in sub_info["params"]]
                     writer.table(["Flag", "Type", "Default", "Description"], rows)
 
     except Exception as e:
@@ -881,10 +743,10 @@ def gen_cli_reference() -> None:
     # ── V19-ENV + V19-PCC-FLAG supplemental sections (survive regeneration) ──
     writer.h2("astra init --non-interactive (CI, V19-ENV)")
     writer.p("Non-interactive, CI-friendly init. Reads flags / env vars, no prompts. Env vars: `ASTRA_DATA_ROOT`, `ASTRA_DARKS_REPOSITORY`, `ASTRA_DEFAULT_PRESET` (and `GIMP_PATH`). Writes `config.yaml` with **resolved** absolute paths (no `${}`).")
-    writer.code('cp .env.example .env  # edit paths\nastra init --non-interactive --data-root "$ASTRA_DATA_ROOT" --darks-library "$ASTRA_DARKS_REPOSITORY"\nastra doctor          # WARN doctor.env_missing if .env absent, Exit 0', lang="bash")
+    writer.code('astra init --non-interactive --data-root "$ASTRA_DATA_ROOT" --darks-library "$ASTRA_DARKS_REPOSITORY"\nastra doctor          # WARN doctor.env_missing if .env absent, Exit 0', lang="bash")
     writer.p("Precedence for `init`/`load_config`: explicit `--config` > `CWD/config.yaml` > `pipeline_root/config.yaml` > `DEFAULT_CONFIG`. `.env` precedence: `Shell Env > CWD/.env > pipeline_root/.env` (`Path.expanduser().resolve()` after `expandvars`).")
     writer.p("ACI: `astra init --non-interactive` is required for AC-ENV-4 and CI `Ubuntu+Win/3.11`.")
-    writer.h2("PCC Flag — Use Cases (V19-PCC-FLAG)")
+    writer.h2("PCC Flag - Use Cases (V19-PCC-FLAG)")
     writer.p("Precedence: **CLI `--pcc/--no-pcc` > Config `pcc.enabled` > Preset Steps > Default**. `default None` = no breaking change. Existing `--pcc-per-group/--no-pcc-per-group` stays independent (location: PCC per group vs. on merged stack).")
     writer.table(["Scenario", "Command"], [
     ["M31 Galaxy, skip PCC (fast, avoid 6 min GAIA timeout)", "`astra process ... --preset galaxy_standard --no-pcc`"],
@@ -942,15 +804,15 @@ def gen_config_reference() -> None:
                 model_name = model.__name__
                 rows = []
                 for fname, finfo in fields.items():
-                    ftype = str(finfo.annotation)[:60].replace("|", "/")
-                    default_raw = _render_default(finfo.default)[:40] if finfo.default is not None else ""
+                    ftype = str(finfo.annotation).replace("|", "/")
+                    default_raw = str(finfo.default) if finfo.default is not None else ""
                     default = _redact_local_paths(default_raw)
                     desc = getattr(finfo, "description", "") or ""
                     if not desc:
                         desc = CONFIG_FIELD_EN.get(f"{model_name}.{fname}", "")
                     if not desc:
                         desc = "-"
-                    rows.append([f"`{fname}`", ftype[:40], default, desc[:80]])
+                    rows.append([f"`{fname}`", ftype, default, desc])
                 if rows:
                     writer.table(["Field", "Type", "Default", "Description"], rows)
             except Exception as e:
@@ -971,20 +833,20 @@ def gen_config_reference() -> None:
         writer.h2("Environment Variables & .env File (V19-ENV)")
         writer.p("Astra supports cross-platform configuration via environment variables and `.env` files. `config.yaml` and `config.example.yaml` use `${VAR:-default}` placeholders that are resolved **before** `yaml.safe_load` via `os.path.expandvars` (manual regex, because Python 3.11 `expandvars` does not support `:-default`) + `Path.expanduser().resolve()`. After `astra init --non-interactive`, the generated `config.yaml` contains **resolved** absolute paths and no `${}`.")
         writer.p("Precedence for `.env` loading: **Shell Env > CWD/.env > pipeline_root/.env**. `python-dotenv` is loaded with `override=False`, so an existing Shell variable is never overwritten by `.env`. CWD wins over `pipeline_root` (project root that contains `src/astro_process`). Every path field is passed through `Path(value).expanduser().resolve()` after expansion, so `~/Astra` and `${HOME}/Astra` both resolve correctly. A missing `.env` triggers `astra doctor` warning `doctor.env_missing` (Exit 0, using defaults).")
-        writer.p("References: `.env.example` and `config.example.yaml` in the repository root. Fresh users: `cp .env.example .env` → edit → `astra init --non-interactive` → `astra process`. Legacy `config.yaml` files with hardcoded paths (e.g. `C:/Users/<your-user>`) remain compatible — values without `${}` are left unchanged.")
+        writer.p("References: `config.example.yaml` in the repository root. Fresh users: `astra init --non-interactive` (reads env vars / flags, no `.env.example` required) → `astra process`. Optional: create `.env` manually for convenience. Legacy `config.yaml` files with hardcoded paths (e.g. `C:/Users/<your-user>`) remain compatible — values without `${}` are left unchanged.")
         writer.h3("1. Windows (PowerShell, persistent)")
         writer.code('# PowerShell — persistent user env (new shell required afterwards)\n[Environment]::SetEnvironmentVariable("ASTRA_DATA_ROOT", "C:\\Astra", "User")\n[Environment]::SetEnvironmentVariable("ASTRA_DARKS_REPOSITORY", "C:\\Astra\\_darks", "User")\n[Environment]::SetEnvironmentVariable("GIMP_PATH", "gimp", "User")\n# verify in new shell\nGet-ChildItem Env:ASTRA_*\n# alternative (cmd): setx ASTRA_DATA_ROOT "C:\\Astra"', lang="powershell")
         writer.h3("2. Linux / macOS (bash, zsh)")
         writer.code('# bash / zsh — add to ~/.bashrc or ~/.zshrc for persistence\nexport ASTRA_DATA_ROOT="$HOME/Astra"\nexport ASTRA_DARKS_REPOSITORY="$HOME/Astra/_darks"\nexport GIMP_PATH="gimp"\n# verify\nenv | grep ASTRA_', lang="bash")
-        writer.h3("3. .env File (recommended, cross-platform)")
-        writer.code('# .env — copy from .env.example (do not commit secrets)\n# cp .env.example .env\nASTRA_DATA_ROOT=C:/Astra\nASTRA_DARKS_REPOSITORY=C:/Astra/_darks\nGIMP_PATH=gimp\nASTRA_DEFAULT_PRESET=star_standard\n# HOME fallback example:\n# ASTRA_DATA_ROOT=${HOME}/Astra', lang="dotenv")
+        writer.h3("3. .env File (optional, cross-platform)")
+        writer.code('# .env — optional, for convenience (do not commit secrets)\nASTRA_DATA_ROOT=C:/Astra\nASTRA_DARKS_REPOSITORY=C:/Astra/_darks\nGIMP_PATH=gimp\nASTRA_DEFAULT_PRESET=star_standard\n# HOME fallback example:\n# ASTRA_DATA_ROOT=${HOME}/Astra', lang="dotenv")
         writer.h3("config.example.yaml — ${VAR:-default} expansion")
         writer.code('data_root: "${ASTRA_DATA_ROOT:-C:/Astra}"\ndarks_repository: "${ASTRA_DARKS_ROOT:-C:/Astra/_darks}"\ngimp_path: "${GIMP_PATH:-gimp}"\n# also supported: ${HOME}/Astra, $VAR, ${VAR}', lang="yaml")
         writer.p("`loader.py` expands every string value recursively via `_expand_env_string` before `yaml.safe_load`. `${VAR:-default}` → `env[VAR]` if set and non-empty, otherwise `default`; `${VAR}` / `$VAR` → `env[VAR]` or `\"\"` (empty, handled by `Path` guard so it does not resolve to CWD). Shell Env always wins over `.env`.")
         writer.h3("astra init --non-interactive (CI)")
         writer.p("`astra init --non-interactive` is the CI-friendly, non-interactive mode. It reads flags / env vars instead of prompting, writes `config.yaml` + `environment.yaml` (Pydantic-validated) with resolved absolute paths, and is safe for `CI Ubuntu+Win/3.11` (required check). Examples:")
-        writer.code('astra init --non-interactive --data-root "$ASTRA_DATA_ROOT" --darks-library "$ASTRA_DARKS_REPOSITORY" --preset star_standard\n# or via .env only (no flags — env vars are read automatically)\ncp .env.example .env  # edit paths\nastra init --non-interactive\nastra doctor          # warns WARN doctor.env_missing if .env absent, but pipeline uses defaults', lang="bash")
-        writer.p("`astra doctor` (read-only) checks: Python, dependencies, GAIA, `config.yaml`, disk, paths, and `.env` existence. `astra doctor --fix` can create a missing `.env` from `.env.example`. Precedence for config discovery: explicit `--config path` > `CWD/config.yaml` > `pipeline_root/config.yaml` > `DEFAULT_CONFIG` string (wheel fallback). Each discovery is logged as `config.loaded_from` (source, path).")
+        writer.code('# Option 1: via CLI flags\nastra init --non-interactive --data-root "$ASTRA_DATA_ROOT" --darks-library "$ASTRA_DARKS_REPOSITORY" --preset star_standard\n\n# Option 2: via shell environment variables (no flags needed)\nexport ASTRA_DATA_ROOT="C:/Astra"\nastra init --non-interactive\n\n# Option 3: via .env file (optional, for convenience)\nastra init --non-interactive\nastra doctor          # checks config, warns WARN doctor.env_missing if .env absent, but pipeline uses defaults', lang="bash")
+        writer.p("`astra doctor` (read-only) checks: Python, dependencies, GAIA, `config.yaml`, disk, paths, and `.env` existence. Precedence for config discovery: explicit `--config path` > `CWD/config.yaml` > `pipeline_root/config.yaml` > `DEFAULT_CONFIG` string (wheel fallback). Each discovery is logged as `config.loaded_from` (source, path).")
         writer.h3("CFA-Drizzle Quality Gate — Precedence (hidden flags, advanced)")
         writer.p("CFA-Drizzle auto selects locking thresholds based on input type. Precedence: **CLI > Config > CFA-Smart-Defaults > Debayered-Defaults**. Hidden flags are documented here (advanced, not in Quickstart) — see `11-troubleshooting.md` for the full list: `--cfa-drizzle-fallback`, `--cfa-drizzle-star-count-min`, `--cfa-drizzle-snr-min`, `--cfa-drizzle-correlation-min`, `--cfa-drizzle-fwhm-range`.")
     except Exception as e:
@@ -1007,16 +869,16 @@ def gen_presets_doc() -> None:
         writer.p(f"**Target Types:** {', '.join(preset.get('target_types', []))}")
         steps = preset.get("steps", [])
         if steps:
-            rows = [[s.get("name", ""), str(s.get("params", ""))[:60] or "-"] for s in steps]
+            rows = [[s.get("name", ""), str(s.get("params", "")) or "-"] for s in steps]
             writer.table(["Step", "Params"], rows)
         pp = preset.get("processing_params", {})
         if pp:
-            rows = [[k, str(v)[:60]] for k, v in pp.items()]
+            rows = [[k, str(v)] for k, v in pp.items()]
             writer.table(["Param", "Value"], rows)
         if preset.get("description"):
             writer.p(preset["description"])
-    # ── V19-PCC-FLAG: Use Cases + --pcc-per-group ─────────────────────────
-    writer.h2("PCC Flag — Use Cases (V19-PCC-FLAG)")
+    # V19-PCC-FLAG: Use Cases + --pcc-per-group
+    writer.h2("PCC Flag - Use Cases (V19-PCC-FLAG)")
     writer.p("PCC = Photometric Color Calibration (star detection + GAIA/VizieR matching + gray_world fallback). Timeout 30 s × retry can accumulate to 6 min on star-poor fields (M31). CLI `--pcc/--no-pcc` (default `None` = Preset/Config wins, no breaking change) mutates preset steps in-memory (see `03-cli-reference.md`). Precedence: **CLI `--pcc/--no-pcc` > Config `pcc.enabled` > Preset Steps > Default**.")
     writer.table(["Use Case", "Command", "Effect"], [
         ["Galaxy (M31), PCC skip (fast, avoid timeout)", "`astra process M31 --preset galaxy_standard --no-pcc`", "Removes `photometric_color_calibration` — fast, no 6 min GAIA block"],
@@ -1035,6 +897,12 @@ def gen_presets_doc() -> None:
         ["`None` + `pcc.enabled`**", "either", "Config `pcc.enabled` decides on/off; `--pcc-per-group` decides where"],
     ])
     writer.p("Insertion log: `pcc.cli_override` (`enabled`, `preset`, `inserted_after`=`background_extraction`/`stack_frames`/`stack_frames_fallback` or `removed`). Mutation is `copy.deepcopy` per call, never persisted to `config.yaml`.")
+    # ── V1.12-STEP3: M31 Mini-Example (A+B) ──────────────────────────────────
+    writer.h2("M31 Mini-Example — Synthetic Wheel + Real Download (V1.12-STEP3)")
+    writer.p("Synthetic offline smoke + real-data reference for galaxy workflow (Handbook 05 §3/5 + 22 §3, `galaxy_standard`).")
+    writer.p("**Synthetic (Wheel, offline, <100 KB):** `astra/data/examples/M31` — 5 lights `lights/group_60s40_astro` 60s Gain 40 Filter Astro (32×32 superpixel, deterministic seed 42 via `tests/synthetic.py`, `OBJECT=M31` `EXPTIME=60` `GAIN=40` `FILTER=Astro`, `NAXIS 32×32`) + `suggested.yaml` `preset: galaxy_standard` (`handbook_ref: \"22 §3 Galaxies + 05-Galaxies.md\"`). Offline smoke: `astra process astra/data/examples/M31 --from-suggested astra/data/examples/M31/suggested.yaml --limit 5 --dry-run` → `discovery.limit_applied group_60s40_astro original=5 selected=5 limit=5` + `smoke_mode true` `frames_total=5` (V1.11-SUBSET `--limit 5` per-group, Darks/Bias/Flats complete, natural sort). Wheel: `hatch build --clean && tar tzf dist/*.whl | grep -E \"examples/M31|suggested.yaml|target-cache.json\"` — synthetic <100 KB (`du -sh astra/data/examples/M31` ~42 KiB), wheel ~409 KB (target-cache.json + examples). No hardcode: `grep -R \"M31.*galaxy_standard\" astra/src --include=\"*.py\"` → 0 (`classify_and_cite` live, `Typ → Handbook → Preset`).")
+    writer.p("**Real (GitHub Release Asset, 10 FITS):** `astra download-example M31 --n 10` fetches 10 real M31 lights 90s Gain 40 Astro (1920×1080, `C:\\Astra\\M31 Andromeda\\lights\\group_90s40_astro` 45F source, first 10 natural sort, header `OBJECT=M31` `EXPTIME=90` `GAIN=40` `FILTER=Astro`) as `M31-example-10fits.tar.gz` (SHA256 manifest, idempotent skip unless `--force`, progress via `rich`, error Exit 2 `download.asset_not_found` on miss), extracts to `<output>/lights/group_90s40_astro/` + `<output>/suggested.yaml` (`galaxy_standard`, `Handbook 22 §3`). Fallback local copy when GitHub unreachable (offline). Example: `astra download-example M31 --n 10 --output C:/Astra/M31_B_test` (or default `C:/Astra/M31`), then Real-Gate: `astra process C:/Astra/M31_B_test --from-suggested C:/Astra/M31_B_test/suggested.yaml --limit 5 --dry-run` → `discovery.limit_applied 90s40_astro original=10 selected=5` + `smoke_mode true` `frames_total=10` `frames_considered=5` (proves pipeline without synthetic).")
+    writer.p("**Handbook refs:** 05 §3 (120–180s Gain 30–40, 60–120s for bright core, `M31 group_60s40_astro 5 synthetic smoke` + `M31 B 90s40 Astro 45F real`) + 05 §5 (30/50–100/150+ lights — 5 synthetic = **smoke only**, 50+ real needed → `download-example`) + 22 §3 Galaxy Workflow (No filter, Deep Sky Registration, Winsor Sigma, PCC) cites Mini-Example both paths + `--limit 5` gate. See `astra download-example --help` (EN §17) and `03-cli-reference.md` download-example.")
     writer.write()
 
 
@@ -1056,8 +924,8 @@ def gen_multi_group_doc() -> None:
         merge_cmd = astra_cli.commands.get("merge")
         if merge_cmd is not None:
             writer.h2("Merge subcommand (`astra merge`)")
-            help_text = _en_help(getattr(merge_cmd, "help", "") or getattr(merge_cmd, "short_help", "") or "", context="command merge")
-            writer.p(_truncate_at_word(help_text, 600))
+            help_text = getattr(merge_cmd, "help", "") or getattr(merge_cmd, "short_help", "") or ""
+            writer.p(help_text)
             rows = []
             for p in merge_cmd.params:
                 pname = ", ".join(p.opts) if hasattr(p, "opts") else str(p.name)
@@ -1072,8 +940,8 @@ def gen_multi_group_doc() -> None:
                 rows.append([
                     f"`{pname}`",
                     ptype,
-                    _redact_local_paths(_render_default(p.default)) if p.default is not None else "",
-                    _truncate_at_word(_en_help(getattr(p, "help", "") or "", context=f"flag {pname}"), 80),
+                    _redact_local_paths(str(p.default)) if p.default is not None else "",
+                    getattr(p, "help", "") or "",
                 ])
             if rows:
                 writer.table(["Flag", "Type", "Default", "Description"], rows)
@@ -1100,8 +968,8 @@ def gen_multi_group_doc() -> None:
                     merge_flags.append([
                         f"`{pname}`",
                         ptype,
-                        _redact_local_paths(_render_default(p.default)) if p.default is not None else "",
-                        _truncate_at_word(_en_help(getattr(p, "help", "") or "", context=f"flag {pname}"), 100),
+                        _redact_local_paths(str(p.default)) if p.default is not None else "",
+                        getattr(p, "help", "") or "",
                     ])
         if merge_flags:
             writer.h2("`process` merge flags")
@@ -1121,7 +989,7 @@ def gen_multi_group_doc() -> None:
             rows = []
             for kind, name in public[:8]:
                 en = _en_symbol(p.stem, name)
-                rows.append([f"`{name}`", kind, _truncate_at_word(en, 80) if en is not None else "—"])
+                rows.append([f"`{name}`", kind, en if en is not None else "—"])
             if rows:
                 writer.table(["Symbol", "Kind", "Description"], rows)
 
@@ -1146,7 +1014,7 @@ def gen_registration_doc() -> None:
             rows = []
             for kind, name in public:
                 en = _en_symbol(p.stem, name)
-                rows.append([f"`{name}`", kind, _truncate_at_word(en, 80) if en is not None else "—"])
+                rows.append([f"`{name}`", kind, en if en is not None else "—"])
             writer.table(["Symbol", "Kind", "Description"], rows)
     # ── V19-REG-SMART Decision Matrix + Ghosting ──────────────────────────
     writer.h2("Decision Matrix (Mount | Exposure | Method | Reasoning)")
@@ -1194,7 +1062,7 @@ def gen_gradient_doc() -> None:
             rows = []
             for kind, name in public:
                 en = _en_symbol(p.stem, name)
-                rows.append([f"`{name}`", kind, _truncate_at_word(en, 80) if en is not None else "—"])
+                rows.append([f"`{name}`", kind, en if en is not None else "—"])
             writer.table(["Symbol", "Kind", "Description"], rows)
     try:
 
@@ -1228,15 +1096,15 @@ def gen_darks_doc() -> None:
             writer.h2("`astra darks` subcommands")
             rows = []
             for sub_name, sub_cmd in sorted(darks_group.commands.items()):
-                help_text = _en_help(getattr(sub_cmd, "help", "") or getattr(sub_cmd, "short_help", "") or "", context=f"darks {sub_name}")
-                rows.append([f"`astra darks {sub_name}`", _truncate_at_word(help_text, 100)])
+                help_text = getattr(sub_cmd, "help", "") or getattr(sub_cmd, "short_help", "") or ""
+                rows.append([f"`astra darks {sub_name}`", help_text])
             if rows:
                 writer.table(["Command", "Description"], rows)
 
             for sub_name, sub_cmd in sorted(darks_group.commands.items()):
                 writer.h3(f"`astra darks {sub_name}`")
-                help_text = _en_help(getattr(sub_cmd, "help", "") or getattr(sub_cmd, "short_help", "") or "", context=f"darks {sub_name}")
-                writer.p(_truncate_at_word(help_text, 600))
+                help_text = getattr(sub_cmd, "help", "") or getattr(sub_cmd, "short_help", "") or ""
+                writer.p(help_text)
                 if sub_cmd.params:
                     rows = []
                     for p in sub_cmd.params:
@@ -1252,8 +1120,8 @@ def gen_darks_doc() -> None:
                         rows.append([
                             f"`{pname}`",
                             ptype,
-                            _redact_local_paths(_render_default(p.default)) if p.default is not None else "",
-                            _truncate_at_word(_en_help(getattr(p, "help", "") or "", context=f"flag {pname}"), 80),
+                            _redact_local_paths(str(p.default)) if p.default is not None else "",
+                            getattr(p, "help", "") or "",
                         ])
                     if rows:
                         writer.table(["Flag", "Type", "Default", "Description"], rows)
@@ -1473,7 +1341,7 @@ def gen_docs_readme() -> None:
         ["", "`handbook/`", "`docs/`"],
         [
             ["**Focus**", "Learn astrophotography & use Siril", "Operate the `astro_process` pipeline"],
-            ["**Tools**", "Dwarf3, Siril 1.4.4, GraXpert, GIMP", "Python, `astra-process`, FITS, config"],
+            ["**Tools**", "Dwarf mini, Siril 1.4.4, GraXpert, GIMP", "Python, `astra-process`, FITS, config"],
             ["**Content**", "37 chapters: acquisition, calibration, stacking, object classes", "12 chapters: pipeline phases, CLI, config, presets, output"],
         ],
     )
@@ -1547,7 +1415,7 @@ def generate_all() -> None:
         "config.yaml": file_hash(CONFIG_YAML),
         "core/": file_hash(SRC_DIR / "core"),
     }
-    hash_file.write_text(json.dumps(current_hashes, indent=2), encoding="utf-8", newline="\n")
+    hash_file.write_text(json.dumps(current_hashes, indent=2), encoding="utf-8")
     print(f"  [OK] Hash file written: {hash_file.relative_to(REPO_ROOT)}")
     print("Done.")
 
@@ -1566,6 +1434,18 @@ def _scan_docs_for_german() -> dict[str, list[str]]:
     hits: dict[str, list[str]] = {}
     for path in sorted(DOCS_DIR.glob("*.md")):
         content = path.read_text(encoding="utf-8")
+        # hand-written plugin doc contains German filename reference (handbook/Plugin-Architektur.md)
+        # and 'standard' in code spans — not prose, skip prose scan for this file
+        if path.name == "plugin-entwicklung.md":
+            # still check for umlauts (real mojibake) but skip German-word prose false positives
+            problems: list[str] = []
+            for m in umlaut_re.finditer(content):
+                problems.append(f"umlaut:{m.group()}")
+                if len(problems) >= 5:
+                    break
+            if problems:
+                hits[path.name] = problems
+            continue
         problems: list[str] = []
         for m in umlaut_re.finditer(content):
             # report first few umlaut hits with context

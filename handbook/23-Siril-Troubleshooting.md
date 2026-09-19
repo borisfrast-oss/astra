@@ -1,6 +1,6 @@
 # 23 – Siril Troubleshooting
 
-# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini` (alias `dwarf3` deprecated since V19)
+# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini`
 
 ---
 

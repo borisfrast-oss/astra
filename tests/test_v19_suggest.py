@@ -9,8 +9,8 @@ S10 (Lessons): gezielte Tests je AC-ENTS, kein Voll-CI je Schritt — diese
 Datei ist der komplette S10-Test-Umfang fuer V1.11-ENTSCHLACKUNG.
 
 Die Tests nutzen einen MOCK-Target-Cache (dieser Datei), NICHT die
-orion-KB (`knowledge-base/agents/stella/target-cache.md`) — astra ist ein
-separates Repo und muss ohne die orion-KB testbar/lauffaehig sein
+gebakte ``astra/data/target-cache.json`` (via importlib.resources) — astra ist ein
+separates Repo und muss ohne externe KB testbar/lauffaehig sein
 (PyPI-Architektur-Randbedingung, siehe core/suggest.py Docstring +
 config/models.py SuggestConfig). SIMBAD-Webfetch wird per
 `patch.object(suggest_mod, "query_simbad", ...)` gestubbt (offline, kein
@@ -804,16 +804,17 @@ class TestAcSug6HandbookCitationNoHardcodedTree:
             r_m31 = runner.invoke(cli, ["-c", str(cfg_path), "suggest", "M31"])
             assert r_m31.exit_code == 0
             assert "Handbook 22" in r_m31.output
-            assert "\u00a73" in r_m31.output or "05-Galaxies.md" in r_m31.output
+            # section sign was replaced with 's.' for cp850 compat (backy 2026-09-19)
+            assert "s.3" in r_m31.output or "05-Galaxies.md" in r_m31.output
 
             r_c19 = runner.invoke(cli, ["-c", str(cfg_path), "suggest", "C19"])
             assert r_c19.exit_code == 0
-            assert "\u00a74/\u00a75" in r_c19.output
+            assert "s.4" in r_c19.output  # was \u00a74/\u00a75
             assert "06-Emission-Nebulae.md" in r_c19.output
 
             r_m13 = runner.invoke(cli, ["-c", str(cfg_path), "suggest", "M13"])
             assert r_m13.exit_code == 0
-            assert "\u00a76" in r_m13.output
+            assert "s.6" in r_m13.output  # was \u00a76
             assert "09-Globular-Clusters.md" in r_m13.output
 
         # Integration: neuer Cache-Entry (NGC 7000) ohne Code-Deploy -> neuer Output

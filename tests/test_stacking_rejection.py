@@ -49,6 +49,7 @@ from astro_process.cli import cli
 
 def _write_fits(path: Path, data: np.ndarray) -> None:
     """Write a 2D FITS file (float32)."""
+    # // Legacy: behalte weil Stacking-Rejection (Winsor-Sigma) Pixel-Statistik prüft, nicht Header — minimal ohne FOCALLEN/XPIXSZ bewusst // Gate: test_v1_12_header_platesolving deckt echten Header ab (5.8) // Kap.4 Matrix behalten
     path.parent.mkdir(parents=True, exist_ok=True)
     fits.PrimaryHDU(np.asarray(data, dtype=np.float32)).writeto(path, overwrite=True)
 

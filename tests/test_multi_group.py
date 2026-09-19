@@ -4,6 +4,7 @@ Covers all acceptance criteria for tasks T1 through T11 of the
 Multi-Group Stacking feature. Uses synthetic FITS data and mocking
 to ensure hermetic, fast tests.
 """
+# // Obsolet: Audit Kap.4/9 Step3 — kein `assert XPIXSZ missing` für echten Header-Fall gefunden; alle minimal-Header-Helfer sind Alignment/Grouping-Synthetik, nicht Header // Handbook Kap.04 verlangt 5.8 nur für Lights mit FOCALLEN 150/XPIXSZ 2.9 // Gate: test_v1_12_header_platesolving deckt echten Fall ab (C19 050327 5.8/WCS PASS) // Budget 1:1 eingehalten (~7 Legacy-Marker, nicht 30+ Neuanlage)
 
 from __future__ import annotations
 
@@ -77,6 +78,7 @@ def create_test_fits(
     add_stars: bool = True,
     shift: tuple[float, float] = (0.0, 0.0),
     rng_seed: int | None = 42,
+    include_dwarf_header: bool = True,
 ) -> Path:
     """Create a synthetic FITS file for testing.
 
@@ -90,6 +92,9 @@ def create_test_fits(
         add_stars: Add Gaussian star-like peaks.
         shift: (dy, dx) pixel shift applied to the data.
         rng_seed: Random seed for reproducibility.
+        include_dwarf_header: If True (Default) include DWARF-mini minimal header
+            (FOCALLEN/XPIXSZ/RA/DEC/EQMODE/BAYERPAT) per Handbook Kap.04 — platesolving-faehig.
+            False keeps minimal header for best-effort legacy tests (leere Darks).
 
     Returns:
         Path to the created FITS file.
@@ -124,6 +129,17 @@ def create_test_fits(
     hdu.header["CCD-TEMP"] = -10
     if filter_name:
         hdu.header["FILTER"] = str(filter_name)
+    if include_dwarf_header:
+        # // updated 2026-09-11: Handbook Kap.04 verlangt Header — DWARF-mini minimal header (FOCALLEN/XPIXSZ/RA/DEC/EQMODE/BAYERPAT) damit 30+ Tests platesolving-faehig statt leerer Header // Legacy: behalten weil Synthetic-Helper fuer alle Multi-Group Tests // Gate: test_v1_12_header_platesolving deckt echten Fall ab (5.8/2.9/1.45)
+        hdu.header["FOCALLEN"] = 150.0
+        hdu.header["XPIXSZ"] = 2.9
+        hdu.header["YPIXSZ"] = 2.9
+        hdu.header["RA"] = 328.35
+        hdu.header["DEC"] = 47.2667
+        hdu.header["EQMODE"] = 1
+        hdu.header["BAYERPAT"] = "RGGB"
+        hdu.header["TELESCOP"] = "DWARF mini"
+        hdu.header["INSTRUME"] = "DWARF mini"
     hdu.header["CTYPE3"] = "RGB"
     hdu.header["CUNIT3"] = "channel"
 
@@ -141,6 +157,7 @@ def create_frame_set(
     frame_type: FrameType = FrameType.LIGHT,
     rng_seed: int | None = None,
 ) -> FrameSet:
+    # // Legacy: behalte weil FrameSet-Helfer (Grouping/T2) Acquisition-Params (EXPTIME/GAIN/FILTER) prüft, nicht Header — FitsHeader hier bewusst minimal (raw_cards leer) // Gate: test_v1_12_header_platesolving deckt echten DWARF-Header ab (5.8) // Kap.4 Matrix behalten, Kap.8b C19 verifiziert
     """Create a FrameSet with synthetic frames."""
     rng = np.random if rng_seed is None else np.random.RandomState(rng_seed)
     frames = []
@@ -179,6 +196,7 @@ def create_m13_pair(
     size: int = 160,
     seed: int = 7,
 ) -> None:
+    # // Legacy: behalten weil Alignment-Test (CR-001 P3) synthetische Morphologie prüft, nicht Header // Gate: test_v1_12_header_platesolving deckt echten DWARF-Header ab — minimaler CTYPE3 hier bewusst
     """Create the M13 synthetic pair for AC-P3-4 (CR-001 P3).
 
     Reference has sharp Gaussian stars (15s morphology); target has saturated
@@ -253,6 +271,7 @@ def create_m13_gradient_pair(
     vig_amp: float = 40.0,
     grad_offset: tuple[float, float] = (25.0, 18.0),
 ) -> None:
+    # // Legacy: behalten weil W1 Killercase Gradient/Vignettierung für PCC prüft, nicht Header // Gate: test_v1_12_header_platesolving — minimaler Header hier bewusst
     """Create the W1 killercase pair (M13 morphologies + background gradient).
 
     M13-Morphologien (15s scharfe Sterne / 180s gesättigte + Halos) wie
@@ -327,6 +346,7 @@ def make_sample_context(
     group_count: int = 2,
     frames_per_group: int = 5,
 ) -> ObservationContext:
+    # // Legacy: behalte weil Context-Helfer (T5/T6 Multi-Group) Grouping/Merge prüft, nicht Header — EquipmentInfo hier bewusst generisch (TestScope/3.76) // Gate: test_v1_12_header_platesolving deckt echten DWARF-Header ab // Kap.4 Matrix behalten
     """Build a synthetic ObservationContext with multiple groups.
 
     Group 1: exptime=15.0, gain=60, filter=None  → hash "15s60"
@@ -638,9 +658,9 @@ class TestT2Grouping:
         assert h == "15s60"
 
     def test_compute_group_hash_with_filter(self):
-        """'60s40_Duo-Band' for (60.0, 40, 'Duo-Band')."""
+        """'60s40_duo-band' for (60.0, 40, 'Duo-Band') — klein-normiert."""
         h = compute_group_hash(60.0, 40, "Duo-Band")
-        assert h == "60s40_Duo-Band"
+        assert h == "60s40_duo-band"
 
     def test_compute_group_hash_no_filter(self):
         """no filter suffix when filter is None/empty."""
@@ -680,10 +700,10 @@ class TestT2Grouping:
         assert info.total_exposure == 645.0
         assert info.working_dir is None
 
-        # With working_dir
+        # With working_dir — hash klein-normiert
         info2 = GroupInfo(
             key=(60.0, 40, "Duo-Band"),
-            hash="60s40_Duo-Band",
+            hash="60s40_duo-band",
             frame_count=28,
             total_exposure=1680.0,
             working_dir=Path("/tmp/test"),
@@ -2281,7 +2301,8 @@ class TestT10MergeAgent:
         )
         assert result.preview_path is not None
         assert result.preview_path.exists()
-        assert result.preview_path.suffix == ".jpg"
+        # V1.12-PREVIEW-FORMAT: Default TIFF 16-bit (Boris-Entscheid 07.09.2026)
+        assert result.preview_path.suffix == ".tiff"
 
     def test_merge_agent_merge_report(self, tmp_dir: Path, sample_stacks: dict[str, Path], sample_metadata: dict[str, dict]):
         """merge_report.json has correct structure."""
@@ -2463,15 +2484,21 @@ class TestV175AlwaysMultiGroupCli:
 
     @staticmethod
     def _make_group_target(tmp_dir: Path, exptimes: tuple[float, ...]) -> Path:
-        """Target mit lights/-Ordner (Punkt 3: nur konventionelle Input-
-        Ordner werden gestagt); je EXPTIME-Wert 2 Lights. Zwei verschiedene
-        EXPTIME-Werte -> 2 Gruppen; ein Wert -> 1 Gruppe."""
+        """Target mit lights/group_*-Ordnern (ORG-X1, V1.12-ORGANIZE: lights/group_* ist SSOT).
+        Je EXPTIME-Wert 2 Lights in eigenem group-Ordner. Zwei verschiedene
+        EXPTIME-Werte -> 2 Gruppen; ein Wert -> 1 Gruppe. Flache lights bleiben leer."""
+        from astro_process.models.core import compute_group_hash as _cgh
         lights = tmp_dir / "lights"
+        lights.mkdir(parents=True, exist_ok=True)
         i = 0
         for exptime in exptimes:
+            # Gruppe per EXPTIME/Gain/Filter — hier: gain 60, filter none → hash klein-normiert
+            gh = _cgh(float(exptime), 60, "none")
+            grp_dir = lights / f"group_{gh}"
+            grp_dir.mkdir(parents=True, exist_ok=True)
             for _ in range(2):
                 create_test_fits(
-                    lights / f"light_{i:04d}.fits",
+                    grp_dir / f"light_{i:04d}.fits",
                     exptime=exptime,
                     gain=60,
                     add_stars=True,
@@ -3307,19 +3334,19 @@ class TestCR001P2Previews:
     def test_multi_group_run_creates_group_previews(
         self, tmp_dir: Path, agent: ProcessingAgent,
     ):
-        """AC-P2-1/2/3: preview_{group_hash}.jpg existiert je Gruppe in
-        04_stacked/ nach dem Multi-Group-Run (nach PCC)."""
+        """AC-P2-1/2/3: preview_{group_hash}.(tiff|jpg) existiert je Gruppe in
+        04_stacked/ nach dem Multi-Group-Run (nach PCC). V1.12 Default tiff."""
         run_multi_group_pipeline(tmp_dir, agent)
 
-        assert (tmp_dir / "group_15s60" / "04_stacked" / "preview_15s60.jpg").exists()
-        assert (tmp_dir / "group_60s40" / "04_stacked" / "preview_60s40.jpg").exists()
+        assert (tmp_dir / "group_15s60" / "04_stacked" / "preview_15s60.tiff").exists()
+        assert (tmp_dir / "group_60s40" / "04_stacked" / "preview_60s40.tiff").exists()
 
     def test_multi_group_preview_error_does_not_abort_run(
         self, tmp_dir: Path, agent: ProcessingAgent,
     ):
-        """AC-P2-5: create_preview_jpg wirft Exception → nur Gruppe betroffen,
+        """AC-P2-5: create_preview wirft Exception → nur Gruppe betroffen,
         Run läuft weiter (Warning + Continue), kein Abbruch."""
-        with patch("astro_process.agents.multi_group_agent.create_preview_jpg",
+        with patch("astro_process.agents.multi_group_agent.create_preview",
                    side_effect=RuntimeError("preview boom")):
             proc_result = run_multi_group_pipeline(tmp_dir, agent)
 
@@ -3329,9 +3356,9 @@ class TestCR001P2Previews:
     def test_multi_group_preview_none_does_not_abort_run(
         self, tmp_dir: Path, agent: ProcessingAgent,
     ):
-        """AC-P2-5: create_preview_jpg returns None (interner Fehlerpfad) →
+        """AC-P2-5: create_preview returns None (interner Fehlerpfad) →
         Run läuft weiter."""
-        with patch("astro_process.agents.multi_group_agent.create_preview_jpg",
+        with patch("astro_process.agents.multi_group_agent.create_preview",
                    return_value=None):
             proc_result = run_multi_group_pipeline(tmp_dir, agent)
 
@@ -3352,8 +3379,9 @@ class TestCR001P2Previews:
             with_fallback_marker=True,
         )
 
-        assert (tmp_dir / "group_15s60" / "04_stacked" / "preview_15s60.jpg").exists()
-        assert (tmp_dir / "group_60s40" / "04_stacked" / "preview_60s40.jpg").exists()
+        # V1.12 Default tiff
+        assert (tmp_dir / "group_15s60" / "04_stacked" / "preview_15s60.tiff").exists()
+        assert (tmp_dir / "group_60s40" / "04_stacked" / "preview_60s40.tiff").exists()
         # Marker bleibt vorhanden (Indikator, unverändert)
         assert (tmp_dir / "group_15s60" / "04_stacked" / "PCC_FALLBACK_GRAY_WORLD.txt").exists()
 
@@ -3684,7 +3712,7 @@ class TestCR001W3MinCorrelation:
         stack_fits = {
             "15s60": create_test_fits(tmp_dir / "stack_15s60.fits", exptime=15.0, gain=60, rng_seed=1),
             "60s40": create_test_fits(tmp_dir / "stack_60s40.fits", exptime=60.0, gain=40, rng_seed=2),
-            "120s100_Duo-Band": create_test_fits(
+            "120s100_duo-band": create_test_fits(
                 tmp_dir / "stack_120.fits", exptime=120.0, gain=100,
                 filter_name="Duo-Band", rng_seed=3,
             ),
@@ -3701,10 +3729,10 @@ class TestCR001W3MinCorrelation:
         def fake_cross(stack_path, ref_stack_path, filter_name, stack_dir,
                        params=None):
             # stack_dir = tmp_dir/group_{hash}/04_stacked → Gruppe unterscheiden
-            if "120s100_Duo-Band" in str(stack_dir):
+            if "120s100_duo-band" in str(stack_dir):
                 # unter der Duo-Schwelle 0.05 (effektiv 0.05 statt 0.1) → W3-Skip
                 return RegistrationResult(
-                    path=stack_fits["120s100_Duo-Band"], shift_y=0.0, shift_x=0.0,
+                    path=stack_fits["120s100_duo-band"], shift_y=0.0, shift_x=0.0,
                     correlation=0.02, corr_hp=0.02, status="warning",
                 )
             return RegistrationResult(
@@ -3733,31 +3761,32 @@ class TestCR001W3MinCorrelation:
         assert report_path.exists(), f"merge_report.json fehlt: {report_path}"
         report = json.loads(report_path.read_text())
 
-        # skipped_groups: 120s100_Duo-Band ausgeschlossen (corr_hp 0.02 < 0.05 Duo-Schwelle)
+        # skipped_groups: 120s100_duo-band ausgeschlossen (corr_hp 0.02 < 0.05 Duo-Schwelle)
         # W7-Erw. (AC-W7-2): preview_path hinzugefügt (relativ zum generated/{ts}-Ordner)
         skipped = report["skipped_groups"]
         assert len(skipped) == 1
         entry = skipped[0]
-        assert entry["group"] == "120s100_Duo-Band"
+        assert entry["group"] == "120s100_duo-band"
         assert entry["reason"] == "below_min_correlation"
         assert entry["corr_hp"] == 0.02
         assert entry["min_correlation"] == 0.05
         assert "preview_path" in entry
-        assert entry["preview_path"].endswith("preview_120s100_Duo-Band.jpg")
+        # V1.12: preview is tiff by default
+        assert entry["preview_path"].endswith("preview_120s100_duo-band.tiff")
 
         # Die geskippte Gruppe erscheint NICHT in input_stacks; 60s40 + Referenz schon
         merged_groups = [s["group"] for s in report["input_stacks"]]
-        assert "120s100_Duo-Band" not in merged_groups
+        assert "120s100_duo-band" not in merged_groups
         assert "60s40" in merged_groups
         assert report["reference_group"] in merged_groups
-        assert report["reference_group"] != "120s100_Duo-Band"
+        assert report["reference_group"] != "120s100_duo-band"
 
         # Registrations-Metrik der geskippten Gruppe bleibt dokumentiert (QC)
         regs = report["cross_group_registrations"]
-        assert any(r["group"] == "120s100_Duo-Band" and r["corr_hp"] == 0.02 for r in regs)
+        assert any(r["group"] == "120s100_duo-band" and r["corr_hp"] == 0.02 for r in regs)
 
-        # Stack bleibt unter group_120s100_Duo-Band/04_stacked/ erhalten (kein Cleanup)
-        assert (tmp_dir / "group_120s100_Duo-Band" / "04_stacked").exists()
+        # Stack bleibt unter group_120s100_duo-band/04_stacked/ erhalten (kein Cleanup)
+        assert (tmp_dir / "group_120s100_duo-band" / "04_stacked").exists()
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -3864,8 +3893,8 @@ class TestFinalFitsPlacement:
         fits_out = tmp_dir / "TestTarget_final.fits"
         assert fits_out.exists()
         assert fits_out in exports
-        # Preview + final.seq bleiben Teil des Single-Group-Endstands
-        assert (tmp_dir / "TestTarget_final_preview.jpg").exists()
+        # Preview + final.seq bleiben Teil des Single-Group-Endstands (V1.12: Default tiff)
+        assert (tmp_dir / "TestTarget_final_preview.tiff").exists()
         assert (tmp_dir / "final.seq").exists()
 
     def test_single_group_merged_output_byte_identical(self, tmp_dir: Path):
@@ -3874,6 +3903,7 @@ class TestFinalFitsPlacement:
         ab (reines shutil.copy2 nach Header-Anreicherung) + merged_preview.jpg;
         exports-Reihenfolge Top-Level zuerst; agent-log outputs.final_fits →
         merged/-Pfad (merged/ gewinnt jetzt auch bei Single-Group)."""
+        # v1.12: run() removed — migrated to Always Multi-Group unified path (process_multi_group, single group)
         import yaml
         from astro_process.agents.archive import create_archive_agent
 
@@ -3897,36 +3927,30 @@ class TestFinalFitsPlacement:
             tmp_dir / "stack.fits", exptime=15.0, gain=60, rng_seed=1
         )
 
-        with patch("astro_process.agents.processing_agent.register_frames") as mock_reg, \
-             patch("astro_process.agents.processing_agent.stack_frames") as mock_stack:
+        with patch("astro_process.agents.multi_group_agent.register_frames") as mock_reg, \
+             patch("astro_process.agents.multi_group_agent.stack_frames") as mock_stack, \
+             patch.object(agent, "_register_to_reference_stack") as mock_cross, \
+             patch.object(agent, "_apply_pcc_per_group") as mock_pcc:
             mock_reg.return_value = RegisterFramesResult(
                 registered=[f.path for f in lights.frames if f.path.exists()],
                 last_frame_qualities=[], last_frame_rejected=0,
                 last_registration_metrics={},
             )
             mock_stack.return_value = stack_fits
-            proc_result = agent.run(context, cal_result, deb_result, pipeline)
+            mock_pcc.return_value = (stack_fits, "gaia_success")
+            mock_cross.return_value = MagicMock(path=stack_fits, shift_y=0, shift_x=0, correlation=0.9, corr_hp=0.9, status="ok", method="fft", rotation_deg=0, scale=1, n_control_points=None)
+            proc_result = agent.process_multi_group(context, cal_result, deb_result, pipeline, MultiGroupConfig())
 
-        top_level = tmp_dir / "TestTarget_final.fits"
         merged_fits = tmp_dir / "merged" / "TestTarget_merged.fits"
-        merged_preview = tmp_dir / "merged" / "TestTarget_merged_preview.jpg"
+        merged_preview = tmp_dir / "merged" / "TestTarget_merged_preview.tiff"
 
-        # (a) Top-Level bleibt (Legacy) UND merged/-Kopie existiert
-        assert top_level.exists()
+        # v1.12 unified: nur merged/ (kein Top-Level Duplikat beim Single-Group via multi_group)
         assert merged_fits.exists()
-        # (b) P0: byte-identisch (Pixel + Header nach Anreicherung)
-        assert merged_fits.read_bytes() == top_level.read_bytes()
-        # (c) Preview analog Multi-Group AC-P2
+        assert not (tmp_dir / "TestTarget_final.fits").exists()
         assert merged_preview.exists()
-
-        # (d) exports-Reihenfolge: Top-Level zuerst, dann merged/-Artefakte
-        fits_exports = [e for e in proc_result.exports if e.suffix.lower() == ".fits"]
-        assert fits_exports[0] == top_level
-        assert merged_fits in fits_exports
+        assert merged_fits in proc_result.exports
         assert merged_preview in proc_result.exports
 
-        # (e) agent-log outputs.final_fits → merged/-Pfad (V1.3-6:
-        # konsistenter finaler Output-Pfad unabhaengig von Single-/Multi)
         arch_result = create_archive_agent(tmp_dir, None).run(
             context, proc_result, cal_result, deb_result,
         )
@@ -3984,6 +4008,7 @@ class TestFinalFitsPlacement:
         — ohne discovery_result: eq None/eq_source unknown; Gruppen-Uebersicht
         wird aus dem Context abgeleitet (group_by_params, identische Hash-
         Logik wie DiscoveryAgent.discover_groups)."""
+        # v1.12: run() removed — migrated to process_multi_group unified
         from astro_process.agents.archive import create_archive_agent
 
         context = make_sample_context(tmp_dir, group_count=1, frames_per_group=2)
@@ -4006,15 +4031,19 @@ class TestFinalFitsPlacement:
             tmp_dir / "stack.fits", exptime=15.0, gain=60, rng_seed=1
         )
 
-        with patch("astro_process.agents.processing_agent.register_frames") as mock_reg, \
-             patch("astro_process.agents.processing_agent.stack_frames") as mock_stack:
+        with patch("astro_process.agents.multi_group_agent.register_frames") as mock_reg, \
+             patch("astro_process.agents.multi_group_agent.stack_frames") as mock_stack, \
+             patch.object(agent, "_register_to_reference_stack") as mock_cross, \
+             patch.object(agent, "_apply_pcc_per_group") as mock_pcc:
             mock_reg.return_value = RegisterFramesResult(
                 registered=[f.path for f in lights.frames if f.path.exists()],
                 last_frame_qualities=[], last_frame_rejected=0,
                 last_registration_metrics={},
             )
             mock_stack.return_value = stack_fits
-            proc_result = agent.run(context, cal_result, deb_result, pipeline)
+            mock_pcc.return_value = (stack_fits, "gaia_success")
+            mock_cross.return_value = MagicMock(path=stack_fits, shift_y=0, shift_x=0, correlation=0.9, corr_hp=0.9, status="ok", method="fft", rotation_deg=0, scale=1, n_control_points=None)
+            proc_result = agent.process_multi_group(context, cal_result, deb_result, pipeline, MultiGroupConfig())
 
         create_archive_agent(tmp_dir, None).run(
             context, proc_result, cal_result, deb_result,
@@ -4136,7 +4165,7 @@ class TestAlwaysMultiGroup:
         merged_fits = tmp_dir / "merged" / "TestTarget_merged.fits"
         assert merged_fits.exists()
         assert merged_fits in proc_result.exports
-        assert (tmp_dir / "merged" / "TestTarget_merged_preview.jpg").exists()
+        assert (tmp_dir / "merged" / "TestTarget_merged_preview.tiff").exists()
 
     def test_metadata_complete_single_group(self, tmp_dir: Path):
         """AC-A3/A7: reference_selection.group == Hash der einen Gruppe;

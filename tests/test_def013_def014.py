@@ -359,11 +359,12 @@ class TestDef014PccSemantics:
         )
 
     def test_pcc_status_noop_in_run_info_when_no_step(self, tmp_path):
-        """pcc_status bleibt 'pending'/'skipped' wenn kein PCC-Step im Preset.
+        """pcc_status bleibt None/'skipped' wenn kein PCC-Step im Preset.
 
         Indirekt: agent-log/run-info zeigen nach DEF-014-Fix NICHT
         vizier_apass_success wenn nebula_standard + pcc.enabled: false.
         Dieser Test prueft das Modell-Verhalten (kein echter Pipeline-Lauf).
+        V1.12-FU-2: pending→None (nicht durchgeführt).
         """
         # nebula_standard: kein PCC-Step
         pipeline = _make_pipeline_without_pcc()
@@ -373,7 +374,7 @@ class TestDef014PccSemantics:
         # Erwartung nach Fix: pcc_step_active=False
         assert not pcc_step_active
         # Wenn pcc_step_active=False -> last_merged_pcc_status bleibt None (kein Aufruf)
-        # Das entspricht pcc_status=None/pending im agent-log
+        # Das entspricht pcc_status=None im agent-log (V1.12-FU-2 Migration)
         # (kein vizier_apass_success fuer nebula_standard + pcc=False)
         expected_pcc_status = None  # kein PCC-Aufruf = kein Status
         assert expected_pcc_status is None  # Tautologie, dokumentiert Erwartung

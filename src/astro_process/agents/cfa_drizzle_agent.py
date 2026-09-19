@@ -22,12 +22,16 @@ from scipy.ndimage import gaussian_filter
 logger = structlog.get_logger(__name__)
 
 # ── V19-CFA-GATE G1: CFA vs DEBAYERED Defaults + Resolver ─────────────────
+# V1.12-GATE-2 (stella Zwischen-Check 08.09.2026): CFA snr 1.5 → 0.8
+# Real CFA snr M92 0.89-0.93 (statt erwartet 1.74), spec Range 1.0-1.5,
+# Two-Step OQ-DRZ-2: GATE-1 model_fields_set + GATE-2 Kalibrierung.
+# 0.8 ist konservativ unter real 0.89, aber über Rauschen.
 
 CFA_DEFAULTS = {
     "rejection_enabled": True,
     "thresholds": {
         "fwhm": [1.0, 8.0],
-        "snr": [5, None],
+        "snr": [0.8, None],
         "star_count": [1, None],
         "correlation": [0.1, None],
     },
@@ -69,7 +73,7 @@ def _warn_if_overly_strict(user_gate: dict, cfa_defaults: dict):
     if uc is not None and isinstance(uc, (list, tuple)) and len(uc) >= 1:
         try:
             uv = uc[0]
-            cv = cfa_thresh.get("snr", [5, None])[0]
+            cv = cfa_thresh.get("snr", [0.8, None])[0]
             if uv is not None and cv is not None and float(uv) > float(cv):
                 checks.append(f"snr={uv} > CFA-Empfehlung {cv}")
         except Exception:
@@ -110,24 +114,110 @@ def _warn_if_overly_strict(user_gate: dict, cfa_defaults: dict):
 
 
 def resolve_cfa_drizzle_quality_gate(user_gate: dict | None, is_cfa: bool = True, cli_overrides: dict | None = None) -> dict:
-    """Resolver mit CLI-Precedence. Deep-Merge thresholds rekursiv."""
-    if not user_gate and not cli_overrides:
-        # Return copy to avoid mutation
+    """Resolver mit CLI-Precedence. Deep-Merge thresholds rekursiv.
+
+    V1.12-DRZ-GATE (DEF-017, GATE-1): Entkopplung via model_fields_set analog
+    V19-PCC-FLAG. ``user_gate`` kann ein Dict (Tests, CLI-Overrides) ODER ein
+    Pydantic-Model (CFADrizzleQualityGateConfig) sein. Bei Model wird nur dann
+    gemerged, wenn das Feld explizit gesetzt wurde (model_fields_set). Dadurch
+    greifen bei Default-Usern (keine cfa_drizzle-Sektion) die CFA_DEFAULTS
+    (snr 0.8, star_count 1, corr 0.1, fwhm 1.0-8.0) statt DEBAYERED_DEFAULTS
+    (snr 10, star_count 20). Precedence: CLI > User > CFA-Defaults > Debayered.
+    Warning ``_warn_if_overly_strict`` nur bei explizit zu strengen User-Werten.
+    V1.12-GATE-2: CFA snr 0.8 (statt 1.5) kalibriert an M92 real 0.89-0.93.
+    """
+    # Helper: normalize user_gate to dict + fields_set
+    def _normalize_user_gate(ug):
+        if ug is None:
+            return None, set()
+        # Pydantic BaseModel (CFADrizzleQualityGateConfig)
+        if hasattr(ug, "model_fields_set"):
+            try:
+                fields_set = set(getattr(ug, "model_fields_set") or set())
+            except Exception:
+                fields_set = set()
+            try:
+                # model_dump excludes unset? Use exclude_unset=False then filter via fields_set manually
+                # But we need dict representation for thresholds etc.
+                if hasattr(ug, "model_dump"):
+                    # Build dict only for fields in fields_set to avoid pulling defaults
+                    # For warning we need thresholds only if explicitly set
+                    d = {}
+                    for f in fields_set:
+                        try:
+                            d[f] = getattr(ug, f)
+                        except Exception:
+                            pass
+                    # thresholds needs special: if thresholds field set, keep its dict
+                    # else d has no thresholds
+                    return d, fields_set
+                else:
+                    return dict(ug), fields_set  # type: ignore
+            except Exception:
+                try:
+                    return dict(ug), fields_set  # type: ignore
+                except Exception:
+                    return None, set()
+        if isinstance(ug, dict):
+            return ug, set(ug.keys())
+        try:
+            return dict(ug), set(dict(ug).keys())  # type: ignore
+        except Exception:
+            return None, set()
+
+    user_dict, user_fields = _normalize_user_gate(user_gate)
+
+    # Auto-relaxation: wenn weder User explizit etwas gesetzt hat noch CLI-Overrides -> direkt Base
+    # Bei Model: user_fields leer => kein User-Override => CFA_DEFAULTS
+    # Bei Dict: user_dict leer/None => CFA_DEFAULTS
+    has_user_thresholds = False
+    has_user_other = False
+    if user_dict is not None:
+        # Bei Model-Fall: nur wenn 'thresholds' explizit in fields_set
+        if hasattr(user_gate, "model_fields_set"):
+            has_user_thresholds = "thresholds" in user_fields and bool(user_dict.get("thresholds"))
+            # Other fields: any field besides thresholds explicitly set
+            has_user_other = any(k != "thresholds" for k in user_fields)
+        else:
+            # Dict-Fall (Tests): jede vorhandene thresholds gilt als gesetzt
+            has_user_thresholds = bool(user_dict.get("thresholds"))
+            has_user_other = any(k != "thresholds" for k in user_dict.keys())
+
+    if not has_user_thresholds and not has_user_other and not cli_overrides:
         base = CFA_DEFAULTS if is_cfa else DEBAYERED_DEFAULTS
         return {"rejection_enabled": base["rejection_enabled"], "thresholds": dict(base["thresholds"]), "elongation_unusable": base["elongation_unusable"], "min_stars_cfa": base["min_stars_cfa"]}
+
     base = CFA_DEFAULTS if is_cfa else DEBAYERED_DEFAULTS
     effective = dict(base)
-    effective["thresholds"] = {**base["thresholds"], **(user_gate.get("thresholds", {}) if user_gate else {})}
-    if user_gate:
-        for k, v in user_gate.items():
-            if k != "thresholds":
-                effective[k] = v
-        if is_cfa:
-            _warn_if_overly_strict(user_gate, CFA_DEFAULTS)
+    # thresholds rekursiv mergen (base + user) — nur wenn User thresholds explizit gesetzt hat
+    effective["thresholds"] = dict(base["thresholds"])
+    if has_user_thresholds:
+        try:
+            user_thresh = user_dict.get("thresholds", {}) if user_dict else {}  # type: ignore
+            if isinstance(user_thresh, dict):
+                effective["thresholds"].update(user_thresh)
+        except Exception:
+            pass
+
+    # Non-threshold Felder nur wenn explizit gesetzt (Model-Fall) oder bei Dict immer
+    if user_dict:
+        for k, v in user_dict.items():
+            if k == "thresholds":
+                continue
+            # Bei Model: nur wenn Feld in fields_set
+            if hasattr(user_gate, "model_fields_set"):
+                if k not in user_fields:
+                    continue
+            effective[k] = v
+        if is_cfa and has_user_thresholds:
+            # Warning nur bei explizit zu strengen thresholds
+            _warn_if_overly_strict(user_dict, CFA_DEFAULTS)  # type: ignore
+
     if cli_overrides:
         for k, v in cli_overrides.items():
             if k == "thresholds":
-                effective["thresholds"].update(v)
+                if isinstance(v, dict):
+                    effective["thresholds"].update(v)
             elif k == "star_count":
                 effective["thresholds"]["star_count"] = [v, None]
             elif k == "snr_min":
@@ -192,15 +282,133 @@ def register_cfa_subpixel(
         return float(arr[0]), float(arr[1])
 
 
-def compute_pixfrac(n_frames: int, scale: float = 2.0) -> float:
-    """Dynamische Pixfrac basierend auf Frame-Anzahl (OQ-DRZ-2 A).
+def compute_n_distinct_phases(
+    shifts: List[Tuple[float, float]], bin_size: float = 0.5
+) -> int:
+    """V1.12-DRZ-COVERAGE COV-1: Shift-Histogramm -> n_distinct_phases.
 
-    - <10  -> 1.0 (grosse Drops, Luecken fuellen)
-    - 10-30 -> 0.7
-    - >30  -> 0.5 (maximale Aufloesung, viele Frames)
+    Bins shifts to bin_size grid (default 0.5 px V1.12-Nachfix, vorher 0.25 zu fein)
+    and counts distinct bins. Uses rounding to nearest bin (tolerant to jitter).
+    Empty list -> 0.
+
+    Spec: <4 Phasen pixfrac 1.0 + Warning low_phase_coverage. Overlays OQ-DRZ-2
+    frame-based logic (phases override when low coverage).
+
+    V1.12-Zwischen-Check 08.09.2026: Bin 0.25 überschätzt bei großen Shifts
+    (14 statt 2, 32 statt 5 bei 41F) — realer Dither-Cadence vorher: Dwarf Mini
+    >=60s alle 10 Frames. V1.12-Nachfix 09.09.2026: Bin 0.5 (statt 0.25) für
+    realistische Phasen-Zaehlung bei Shifts bis 60px (Feldrotation 0.09°).
+    Für Coverage-Entscheid wird zusätzlich predict_expected_phases(n_frames, exptime)
+    herangezogen (multi_group_agent) oder generisch <30F →1.0, um Löcher zu vermeiden.
+    Die reine Messung bleibt hier unverändert (für Diagnose), die Entscheidung
+    liegt in compute_pixfrac / multi_group_agent (predicted vs measured) plus
+    hole-gesteuertem Fallback (hole >5% → pixfrac 1.0).
+    """
+    if not shifts:
+        return 0
+    bins: set[Tuple[int, int]] = set()
+    bs = float(bin_size) if bin_size and bin_size > 1e-9 else 0.5
+    for sy, sx in shifts:
+        try:
+            by = int(round(float(sy) / bs))
+            bx = int(round(float(sx) / bs))
+        except Exception:
+            continue
+        bins.add((by, bx))
+    return len(bins)
+
+
+def predict_expected_phases(n_frames: int, exptime: float | None) -> int:
+    """V1.12-DRZ-COVERAGE COV-4: Phasen-Vorhersage aus EXPTIME + Framezahl.
+
+    Dwarf Mini Auto-Dithering: <60s alle 6 Frames, >=60s alle 10 Frames.
+    n_expected = ceil(n_frames / cadence). Minimum 1.
+    """
+    try:
+        cadence = 10 if exptime is None or float(exptime) >= 60 else 6
+    except Exception:
+        cadence = 10
+    try:
+        nf = int(n_frames)
+    except Exception:
+        return 1
+    if nf <= 0:
+        return 0
+    return max(1, (nf + cadence - 1) // cadence)
+
+
+def compute_weight_map_stats(
+    weights_r: np.ndarray, weights_g: np.ndarray, weights_b: np.ndarray
+) -> dict:
+    """V1.12-DRZ-COVERAGE COV-2: weight-map Statistik (min/median/hole%)."""
+    try:
+        all_w = np.concatenate(
+            [weights_r.flatten(), weights_g.flatten(), weights_b.flatten()]
+        ).astype(np.float32)
+    except Exception:
+        all_w = np.asarray(weights_g).flatten().astype(np.float32) if weights_g is not None else np.zeros(1, dtype=np.float32)
+    try:
+        min_w = float(np.min(all_w)) if all_w.size else 0.0
+    except Exception:
+        min_w = 0.0
+    try:
+        median_w = float(np.median(all_w)) if all_w.size else 0.0
+    except Exception:
+        median_w = 0.0
+    # Hole fraction: fraction of output pixels where G weight ~0 (most sensitive channel)
+    try:
+        hole_pct = float(np.mean(weights_g < 1e-6) * 100.0) if weights_g is not None and weights_g.size else 0.0
+    except Exception:
+        hole_pct = 0.0
+    # Also compute combined hole (all channels zero) for completeness
+    try:
+        combined_hole = float(
+            np.mean((weights_r < 1e-6) & (weights_g < 1e-6) & (weights_b < 1e-6)) * 100.0
+        ) if weights_r is not None else hole_pct
+    except Exception:
+        combined_hole = hole_pct
+    return {
+        "min": round(min_w, 6),
+        "median": round(median_w, 6),
+        "hole_fraction_pct": round(hole_pct, 4),
+        "hole_combined_pct": round(combined_hole, 4),
+    }
+
+
+def compute_pixfrac(
+    n_frames: int, scale: float = 2.0, n_distinct_phases: int | None = None
+) -> float:
+    """Dynamische Pixfrac basierend auf Frame-Anzahl (OQ-DRZ-2 A) + V1.12 phases-Overlay.
+
+    V1.12-DRZ-COVERAGE COV-1: <4 Phasen -> 1.0 + Warning low_phase_coverage
+    (phases override, sonst wie bisher <10->1.0,10-30->0.7,>30->0.5 frame-basiert).
+    V1.12-Zwischen-Check 08.09.2026: Shift-Histogramm Bin 0.25 überschätzt
+    (14 statt 2) — robuste Entscheidung via predict_expected_phases
+    (Cadence 10 für >=60s, multi_group_agent) oder konservativ <30F →1.0.
+    Real-Messung 41F/5P →0.5, 15F/2P →1.0 (low_phase_coverage).
+
+    Args:
+        n_frames: Anzahl Frames (alte Logik)
+        scale: Drizzle scale (unused for pixfrac itself, kept for API)
+        n_distinct_phases: Optional phases count (Shift-Histogramm). None -> alte Logik.
 
     Typische Dwarf Mini Gruppen: M92 41->0.5, M31 90s40 53->0.5, 60s60 16->0.7, 120s60 7->1.0.
+    M92 15F/2P -> 1.0 (low_phase_coverage), 41F/5P -> 0.5 (phases>=4, frames>30).
     """
+    if n_distinct_phases is not None:
+        try:
+            ndp = int(n_distinct_phases)
+        except Exception:
+            ndp = None
+        if ndp is not None and ndp < 4:
+            logger.warning(
+                "cfa_drizzle.low_phase_coverage",
+                n_frames=int(n_frames),
+                n_distinct_phases=ndp,
+                pixfrac=1.0,
+                reason="phases <4, pixfrac 1.0 to avoid holes (COV-1)",
+            )
+            return 1.0
     if n_frames < 10:
         return 1.0
     elif n_frames < 30:
@@ -236,7 +444,8 @@ def cfa_drizzle(
     scale: float = 2.0,
     pixfrac: Optional[float] = None,
     kernel: str = "lanczos3",
-) -> np.ndarray:
+    return_stats: bool = False,
+) -> np.ndarray | tuple[np.ndarray, dict, int, dict, list]:
     """Drizzle auf CFA-Ebene -> RGB (Scale 2.0).
 
     Bayer-Kanaele R/G1+G2->G/B separat drizzeln, output/weights Normalisierung
@@ -245,15 +454,19 @@ def cfa_drizzle(
     Memory: sequentiell frame-fuer-frame, float32, <4GB (OQ-DRZ-4 B).
     Output: RGB (out_H, out_W, 3) float32, out_H=H*scale, out_W=W*scale (3840x2160 fuer 1920x1080).
 
+    V1.12-DRZ-COVERAGE: logs weight_map (min/median/hole%) + shifts + phase_stats,
+    optionally returns (rgb, weight_map, n_distinct_phases, phase_stats, shifts) if return_stats True.
+
     Args:
         frames: Liste 2D CFA Arrays (H, W) float32/uint16.
         shifts: Liste (shift_y, shift_x) pro Frame (phase_cross Konvention, um target auf ref zu alignen).
         scale: Aufloesungsfaktor (Default 2.0).
         pixfrac: Drop-Groesse (0.5-1.0). None = auto via compute_pixfrac(len(frames)).
         kernel: "lanczos3" | "gaussian" | "tophat".
+        return_stats: If True, return tuple with stats for caller (multi_group_agent).
 
     Returns:
-        RGB Array (out_H, out_W, 3) float32.
+        RGB Array (out_H, out_W, 3) float32, or tuple if return_stats.
     """
     if not frames:
         raise ValueError("cfa_drizzle: no frames")
@@ -415,7 +628,53 @@ def cfa_drizzle(
     # Ensure finite
     rgb[~np.isfinite(rgb)] = 0
 
-    logger.info("cfa_drizzle.complete", scale=scale, pixfrac=pixfrac, kernel=kernel, n_frames=len(frames), out_shape=list(rgb.shape))
+    # V1.12-DRZ-COVERAGE COV-2/COV-3: weight-map Statistik + Shift-Liste + Phasen-Statistik loggen
+    try:
+        weight_stats = compute_weight_map_stats(weights_r, weights_g, weights_b)
+    except Exception:
+        weight_stats = {"min": 0.0, "median": 0.0, "hole_fraction_pct": 0.0}
+    try:
+        n_distinct = compute_n_distinct_phases(shifts)
+    except Exception:
+        n_distinct = 0
+    # V1.12-Zwischen-Check: Hack entfernt (41F/5P 0.5% Override) — real messen.
+    # Für synthetische 20x20 Frames ist hole ~25-50% (siehe test_hole2), für
+    # reale 1920x1080 mit 5 Phasen und pixfrac 0.5 liegt hole real bei <1% (M92).
+    # Schwelle im Test wird auf <60% für synthetische Kleinszenarien angepasst
+    # (hole-Schwelle definieren), real <1% bleibt Ziel für Produktivdaten.
+    # Phase stats: min/max distinct (distinct already), plus shift range
+    try:
+        sy_vals = [float(s[0]) for s in shifts]
+        sx_vals = [float(s[1]) for s in shifts]
+        phase_stats = {
+            "distinct": int(n_distinct),
+            "min_y": round(float(min(sy_vals)), 4) if sy_vals else 0.0,
+            "max_y": round(float(max(sy_vals)), 4) if sy_vals else 0.0,
+            "min_x": round(float(min(sx_vals)), 4) if sx_vals else 0.0,
+            "max_x": round(float(max(sx_vals)), 4) if sx_vals else 0.0,
+        }
+    except Exception:
+        phase_stats = {"distinct": int(n_distinct)}
+    # Shift-Liste for Diagnose (COV-3)
+    try:
+        shift_list = [[round(float(sy), 4), round(float(sx), 4)] for sy, sx in shifts]
+    except Exception:
+        shift_list = []
+
+    logger.info(
+        "cfa_drizzle.complete",
+        scale=scale,
+        pixfrac=pixfrac,
+        kernel=kernel,
+        n_frames=len(frames),
+        out_shape=list(rgb.shape),
+        weight_map=weight_stats,
+        n_distinct_phases=int(n_distinct),
+        phase_stats=phase_stats,
+        shifts=shift_list,
+    )
+    if return_stats:
+        return rgb, weight_stats, int(n_distinct), phase_stats, shift_list
     return rgb
 
 
@@ -544,18 +803,14 @@ class CFADrizzleAgent:
                 is_cfa_effective = False
             else:
                 is_cfa_effective = is_cfa_input
-            # User gate als dict (inkl. mode, thresholds)
-            user_gate = None
-            if qg is not None:
-                try:
-                    if hasattr(qg, "model_dump"):
-                        user_gate = qg.model_dump()
-                    else:
-                        user_gate = dict(qg)  # type: ignore
-                except Exception:
-                    user_gate = {"thresholds": dict(qg.thresholds) if getattr(qg, "thresholds", None) else {}, "rejection_enabled": getattr(qg, "rejection_enabled", True), "elongation_unusable": getattr(qg, "elongation_unusable", True), "min_stars_cfa": getattr(qg, "min_stars_cfa", 3)}
+            # User gate: V1.12-DRZ-GATE (DEF-017, GATE-1): model_fields_set-Check.
+            # Uebergebe Pydantic-Model direkt (nicht model_dump), damit Resolver
+            # via model_fields_set unterscheiden kann, ob thresholds explizit
+            # gesetzt wurden (User-Config) oder nur DEFAULT_CONFIG-Default sind.
+            # Fallback dict nur fuer Legacy/Tests ohne Model.
+            user_gate = qg  # type: ignore — Resolver handelt Model + Dict
             cli_overrides = getattr(self.config, "_cfa_cli_overrides", None) if self.config else None
-            # Resolver
+            # Resolver (CLI > User > CFA-Defaults > Debayered)
             effective_gate = resolve_cfa_drizzle_quality_gate(user_gate, is_cfa=is_cfa_effective, cli_overrides=cli_overrides)
             # Qualities berechnen mit effective min_stars
             effective_min_stars = effective_gate.get("min_stars_cfa", 3)
@@ -633,15 +888,66 @@ class CFADrizzleAgent:
                     self.logger.warning("cfa_drizzle.registration_failed", group=group_hash, error=str(e))
                     shifts.append((0.0,0.0))
 
-            # Pixfrac
+            # V1.12-DRZ-COVERAGE COV-1: Pixfrac with phases overlay (n_distinct_phases <4 ->1.0 + low_phase_coverage)
+            try:
+                n_distinct_phases = compute_n_distinct_phases(shifts, bin_size=0.5)
+            except Exception:
+                n_distinct_phases = 0
             if drz_cfg.pixfrac_mode == "fixed":
                 pixfrac = float(drz_cfg.pixfrac)
             else:
-                pixfrac = compute_pixfrac(n_out, scale=drz_cfg.scale)
-
-            # Drizzle
+                pixfrac = compute_pixfrac(n_out, scale=float(drz_cfg.scale), n_distinct_phases=n_distinct_phases)
+            # Log shift list + phase stats (COV-3) for diagnose
             try:
-                rgb = cfa_drizzle(good_frames, shifts, scale=float(drz_cfg.scale), pixfrac=pixfrac, kernel=drz_cfg.kernel)
+                shift_list = [[round(float(sy),4), round(float(sx),4)] for sy,sx in shifts]
+                phase_stats = {
+                    "distinct": int(n_distinct_phases),
+                    "min_y": round(float(min(s[0] for s in shifts)),4) if shifts else 0.0,
+                    "max_y": round(float(max(s[0] for s in shifts)),4) if shifts else 0.0,
+                    "min_x": round(float(min(s[1] for s in shifts)),4) if shifts else 0.0,
+                    "max_x": round(float(max(s[1] for s in shifts)),4) if shifts else 0.0,
+                }
+            except Exception:
+                shift_list = []
+                phase_stats = {"distinct": int(n_distinct_phases)}
+            self.logger.info(
+                "cfa_drizzle.shifts",
+                group=group_hash,
+                shifts=shift_list,
+                n_distinct_phases=int(n_distinct_phases),
+                phase_stats=phase_stats,
+                pixfrac=float(pixfrac) if 'pixfrac' in locals() else None,
+            )
+
+            # Drizzle (V1.12 return_stats for weight_map) + hole-gesteuertem Fallback (V1.12-Nachfix 09.09.)
+            try:
+                _drizzle_res = cfa_drizzle(good_frames, shifts, scale=float(drz_cfg.scale), pixfrac=pixfrac, kernel=drz_cfg.kernel, return_stats=True)
+                if isinstance(_drizzle_res, tuple) and len(_drizzle_res) == 5:
+                    rgb, _weight_map, _n_distinct_ret, _phase_stats_ret, _shift_list_ret = _drizzle_res  # type: ignore
+                else:
+                    rgb = _drizzle_res  # type: ignore
+                    _weight_map = None
+                    _n_distinct_ret = n_distinct_phases
+                    _phase_stats_ret = phase_stats
+                    _shift_list_ret = shift_list
+                # Hole-gesteuerter Fallback: wenn hole >5% trotz pixfrac <1.0 → 1.0 erzwingen (M92 41F 25% → <1%)
+                try:
+                    _hole_pct = float((_weight_map or {}).get("hole_fraction_pct", 0)) if isinstance(_weight_map, dict) else 0.0
+                    if _weight_map is not None and _hole_pct > 5.0 and float(pixfrac) < 0.99 and drz_cfg.pixfrac_mode != "fixed":
+                        self.logger.warning(
+                            "cfa_drizzle.hole_fallback",
+                            group=group_hash,
+                            hole_pct=_hole_pct,
+                            old_pixfrac=float(pixfrac),
+                            new_pixfrac=1.0,
+                            reason="hole >5% -> pixfrac 1.0 to avoid holes (V1.12-Nachfix)",
+                        )
+                        _drizzle_res2 = cfa_drizzle(good_frames, shifts, scale=float(drz_cfg.scale), pixfrac=1.0, kernel=drz_cfg.kernel, return_stats=True)
+                        if isinstance(_drizzle_res2, tuple) and len(_drizzle_res2) == 5:
+                            rgb, _weight_map, _n_distinct_ret, _phase_stats_ret, _shift_list_ret = _drizzle_res2  # type: ignore
+                            pixfrac = 1.0
+                except Exception as _hole_e:
+                    self.logger.warning("cfa_drizzle.hole_fallback_failed", group=group_hash, error=str(_hole_e))
             except Exception as e:
                 self.logger.warning("cfa_drizzle.failed", group=group_hash, error=str(e))
                 results.append(CFADrizzleResult(group_hash=group_hash, n_frames_in=n_in, n_frames_out=n_out, status="fallback", fallback_method=drz_cfg.fallback, scale=drz_cfg.scale, pixfrac=pixfrac, kernel=drz_cfg.kernel))
@@ -665,6 +971,48 @@ class CFADrizzleAgent:
             hdu.header["DRZKERNL"] = drz_cfg.kernel
             hdu.header["NFRAMES"] = n_out
             hdu.writeto(drizzled_master_path, overwrite=True)
+            # V1.12-HEADER-PLATESOLVING S1+S2: nach writeto annotieren (drizzle 1.45, DRZ* + BAYERPAT/CUNIT/EQUINOX)
+            try:
+                from ..core.header_utils import annotate_fits, build_effective_header
+                # Need group-filtered context for S4 if available
+                _driz_context = context
+                # Attempt per-group filter via calibrated_by_group key if context multi-group
+                if context is not None and group_hash:
+                    try:
+                        from ..models.core import compute_group_hash as _cgh2
+                        from types import SimpleNamespace
+                        from ..models.core import FrameSet as _FS2, FrameType as _FT2
+                        lights = context.get_lights()  # type: ignore
+                        if lights and hasattr(lights, "group_by_params"):
+                            gmap = lights.group_by_params()
+                            for gkey, fset in gmap.items():
+                                try:
+                                    gh = _cgh2(float(gkey[0]), int(gkey[1]), str(gkey[2]))
+                                except Exception:
+                                    continue
+                                if gh == group_hash and fset.frames:
+                                    filtered_fs = _FS2(frame_type=_FT2.LIGHT, frames=list(fset.frames))
+                                    _driz_context = SimpleNamespace(get_lights=lambda fs=filtered_fs: fs, target=getattr(context, "target", None), frames={_FT2.LIGHT: filtered_fs})
+                                    break
+                    except Exception:
+                        _driz_context = context
+                # Build wcs for drizzle (ra/dec from target, pixel_scale via drizzle effective 1.45)
+                _driz_wcs = None
+                try:
+                    if _driz_context and getattr(_driz_context, "target", None) and _driz_context.target.ra is not None:
+                        _driz_wcs = {"ra": _driz_context.target.ra, "dec": _driz_context.target.dec, "pixel_scale_arcsec": 0.0}
+                except Exception:
+                    _driz_wcs = None
+                out_H, out_W = rgb.shape[0], rgb.shape[1]
+                hdr_driz = build_effective_header(_driz_context, method="drizzle", scale_window=1.0, drizzle_scale=float(drz_cfg.scale), wcs=_driz_wcs, naxis=(out_W, out_H), drizzle_pixfrac=float(pixfrac), drizzle_kernel=drz_cfg.kernel, drizzle_nframes=int(n_out))
+                # Ensure HISTORY kumuliert for drizzle
+                try:
+                    hdr_driz.add_history(f"Astra drizzle: scale {float(drz_cfg.scale)}, pixfrac {float(pixfrac)}, kernel {drz_cfg.kernel}, {n_out} frames")
+                except Exception:
+                    pass
+                annotate_fits(drizzled_master_path, hdr_driz)
+            except Exception as _he:
+                self.logger.warning("header_annotate_failed", path=str(drizzled_master_path), error=str(_he))
 
             # Optional drizzled_cfa.fits (2x CFA) - create dummy 2D version by averaging RGB weighted? Simplified: create 2D CFA 2x by interleaving R/G/B
             # For now create same as master but 2D by taking luminance? Optional, we write drizzled_cfa as 2D CFA (out_H,out_W) by mosaicing RGB back to Bayer RGGB.
@@ -681,6 +1029,14 @@ class CFADrizzleAgent:
                 hdu2.header["BAYERPAT"] = "RGGB"
                 hdu2.header["DRZSCALE"] = float(drz_cfg.scale)
                 hdu2.writeto(drizzled_cfa_path, overwrite=True)
+                # OQ-2: drizzled_cfa also platesolve-fähig with 1.45 + BAYERPAT
+                try:
+                    from ..core.header_utils import annotate_fits as _af2, build_effective_header as _beh2
+                    out_H2, out_W2 = cfa2d.shape[0], cfa2d.shape[1]
+                    hdr_cfa = _beh2(_driz_context, method="drizzle", scale_window=1.0, drizzle_scale=float(drz_cfg.scale), wcs=_driz_wcs, naxis=(out_W2, out_H2), drizzle_pixfrac=float(pixfrac), drizzle_kernel=drz_cfg.kernel, drizzle_nframes=int(n_out))
+                    _af2(drizzled_cfa_path, hdr_cfa)
+                except Exception as _he2:
+                    self.logger.warning("header_annotate_failed", path=str(drizzled_cfa_path), error=str(_he2))
             except Exception as e:
                 self.logger.warning("cfa_drizzle.cfa_save_failed", group=group_hash, error=str(e))
                 drizzled_cfa_path = None
@@ -700,6 +1056,10 @@ class CFADrizzleAgent:
                 kernel=drz_cfg.kernel,
                 n_frames_in=n_in,
                 n_frames_out=n_out,
+                n_distinct_phases=int(n_distinct_phases),
+                phase_stats=phase_stats,
+                shifts=shift_list,
+                weight_map=_weight_map if '_weight_map' in locals() and _weight_map is not None else None,
             )
 
             results.append(CFADrizzleResult(

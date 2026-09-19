@@ -6,6 +6,20 @@
 
 # Troubleshooting
 
+## Quality checking
+
+Check image quality from your latest processing run:
+
+```bash
+# Recommended: use --latest (safe, no arguments required)
+astra qc --latest
+
+# Alternative: explicit timestamp
+astra qc "C:/Astra/M31/generated/2026-09-19T140530Z/"
+```
+
+Reports measurements for flip (Bayer demosaicing artifacts), ghosting (registration misalignment), and color balance from the merged stack. Exit code 0 = OK, 1 = warnings (excessive flip/ghosting/color shift).
+
 ## Error codes and common log messages
 
 | Symptom / exit code | Meaning | What to do |
@@ -108,7 +122,7 @@ Quickstart, but documented here):
 |------|---------------------|-----------|-------------|
 | `--cfa-drizzle-fallback` | `malvar` | `malvar` | Fallback debayer if gate fails / `min_frames` not met |
 | `--cfa-drizzle-star-count-min` | `20` | `1` | Min `star_count` — Bayer needs 1-2, debayered 20+ |
-| `--cfa-drizzle-snr-min` | `10` | `5` | Min `snr` — Bayer 5-8, debayered 10+ |
+| `--cfa-drizzle-snr-min` | `10` | `0.8` | Min `snr` — V1.12-DRZ-GATE calibrated on M92 real 0.89-0.93 (Bayer 0.8, debayered 10) |
 | `--cfa-drizzle-correlation-min` | `0.3` | `0.1` | Min `correlation` — Bayer 0.1-0.4, debayered 0.3+ |
 | `--cfa-drizzle-fwhm-range` | `1.5,5.0` | `1.0,8.0` | FWHM range `min,max` — Bayer PSF broader |
 
@@ -127,6 +141,43 @@ cfa_drizzle:
       star_count: [1, null]   # >1 triggers WARN if is_cfa, but still effective
 ```
 
+## Version and Entry-point Precedence (FU-1, 2026-09-08)
+
+Version is single-source-of-truth in ``pyproject.toml`` ``[project] version``
+(hatchling, not dynamic). Runtime resolution via ``importlib.metadata``
+(``astra-pipeline`` -> ``astra`` legacy fallback -> ``0.0.0+dev`` when running
+from source without install) is shared by both entry-points:
+
+- ``import astro_process; astro_process.__version__`` (``src/astro_process/__init__.py``)
+- ``astra --version`` and ``python -m astro_process --version`` (``src/astro_process/cli.py``)
+
+Both read the same installed distribution metadata — equal precedence, no
+hard-coded duplicate. ``CHANGELOG.md`` is curated from that version
+(``git-cliff``, Keep-a-Changelog); git tag ``v<version>`` is created *from*
+``pyproject.toml`` at publish time (``release-process.md`` Phase 5), never the
+reverse. Order: ``__version__/pyproject -> CHANGELOG -> git-tag``. See
+``src/astro_process/__init__.py`` docstring and ``pyproject.toml`` header
+comment for the canonical statement.
+
+Entry-point parity (FU-1): canonical ``astra`` console script
+(``[project.scripts] astra = "astro_process.cli:cli"``, alias ``astro-process``)
+and module execution ``python -m astro_process`` (``src/astro_process/__main__.py``)
+forward to the same ``cli:cli`` — equal precedence. ``python -m astra`` is not
+supported (``packages = ["src/astro_process"]``); use ``astra`` or
+``python -m astro_process``.
+
+## PCC Suggest-side P-03 Status (FU-1, 2026-09-08)
+
+PCC ``rejected_implausible_factors`` (``core/pcc.py`` Quality Gate
+``[0.5, 2.0]``) cannot be predicted at ``astra suggest`` time — it is a
+runtime decision on the stacked frame. Per stella 07.09., suggest is
+structurally unable to know it; coverage is considered *covered* downstream
+via ``pcc_status`` three-valued (``None``/``timeout``/``success``, FU-2
+``agent-log.yaml``/``run-info.json``) plus QC color context (``core/qc.py``
+G-excess >15% with PCC status). See ``src/astro_process/core/suggest.py``
+module docstring (P-03 Status) and backlog.md V1.12-FU-1 (expected: covered
+via pcc_status agent-log + FU-2 + qc color context).
+
 ## FAQ
 
 - **Where is the final stack?** Always in `generated/<ts>/merged/`. A legacy
@@ -142,12 +193,29 @@ cfa_drizzle:
 
 | Exit code | Location |
 | --- | --- |
-| 0 | src/astro_process/cli.py:3467 |
-| 0 | src/astro_process/cli.py:3471 |
-| 0 | src/astro_process/cli.py:3476 |
-| 1 | src/astro_process/cli.py:3449 |
-| 2 | src/astro_process/cli.py:1327 |
-| 2 | src/astro_process/cli.py:720 |
+| 0 | src/astro_process/cli.py:3720 |
+| 0 | src/astro_process/cli.py:3724 |
+| 0 | src/astro_process/cli.py:3729 |
+| 0 | src/astro_process/cli.py:4157 |
+| 0 | src/astro_process/cli.py:4196 |
+| 0 | src/astro_process/cli.py:4206 |
+| 0 | src/astro_process/cli.py:4299 |
+| 0 | src/astro_process/cli.py:4448 |
+| 1 | src/astro_process/cli.py:3702 |
+| 1 | src/astro_process/cli.py:3790 |
+| 1 | src/astro_process/cli.py:3837 |
+| 1 | src/astro_process/cli.py:3842 |
+| 1 | src/astro_process/cli.py:4046 |
+| 1 | src/astro_process/cli.py:4122 |
+| 1 | src/astro_process/cli.py:4185 |
+| 2 | src/astro_process/cli.py:1406 |
+| 2 | src/astro_process/cli.py:4035 |
+| 2 | src/astro_process/cli.py:4132 |
+| 2 | src/astro_process/cli.py:4167 |
+| 2 | src/astro_process/cli.py:4170 |
+| 2 | src/astro_process/cli.py:4180 |
+| 2 | src/astro_process/cli.py:4182 |
+| 2 | src/astro_process/cli.py:749 |
 
 ## Known issues reflected in releases
 

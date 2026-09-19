@@ -1,0 +1,21 @@
+# suggested_parameters.yaml - M31 mini example synthetic
+# Source: synthetic Wheel example, Handbook 05-Galaxies.md + 22 decision tree
+# Generated deterministically via tests/synthetic.py (seed 42) - offline smoke
+# Handbook: 05 Galaxies 60-120s Gain 30-40 No filter + 22 Galaxy Workflow No filter
+version: 1
+target: M31
+simbad_name: M31
+type: galaxy
+handbook_ref: "22 §3 Galaxies + 05-Galaxies.md"
+source: synthetic
+preset: galaxy_standard
+registration:
+  method: astroalign
+  max_rotation_deg: 15
+debayer:
+  method: superpixel
+pcc:
+  enabled: true
+equipment_hint: dwarf_mini
+filter_hint: Astro
+exptime_hint: 60

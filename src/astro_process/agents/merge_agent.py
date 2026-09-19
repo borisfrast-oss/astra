@@ -19,7 +19,7 @@ import numpy as np
 from astropy.io import fits
 
 from ..config.models import MergeConfig
-from ..core.preview import create_preview_jpg
+from ..core.preview import create_preview, create_preview_jpg
 
 if TYPE_CHECKING:
     from ..config.models import PreviewExportConfig
@@ -81,6 +81,7 @@ class MergeAgent:
         skipped_groups: Optional[list[dict]] = None,
         reference_selection: Optional[dict] = None,
         preview_config: Optional["PreviewExportConfig"] = None,
+        context=None,
     ) -> MergeResult:
         """Run merge on group stacks.
 
@@ -151,9 +152,39 @@ class MergeAgent:
                 group_metadata=group_metadata,
                 merge_report={"error": "insufficient_stacks"},
             )
+        # P-04-Mini (V1.12-FU-3): Single-Stack Fallback laut loggen — 1 Kandidat nach Gate/Filter
+        # Bei N>=2 Eingabe + skipped_groups (filter_typo / cross_group_gate) fällt Merge still
+        # auf 1 Stack zurück. Statt still: Warning `merge.fell_back_to_single_group` + Report-Feld
+        # `merge.fallback`. Die detaillierte Fallback-Erkennung (Integration_lost_pct) passiert
+        # nach dem Laden, damit echte Valid-Stacks gezaehlt werden; hier nur der Eingabe-Pfad
+        # fuer die Warnung single_stack_fallback komplementaer ergaenzen.
         if len(group_stacks) == 1:
             # V19-FIX-11 P0 Gate Duo-Band: single_stack_fallback — mit Warnung statt hart Skip wenn nur 1 Stack übrig (wie Single-Group)
             sole_hash = next(iter(group_stacks))
+            # P-04: Wenn skipped_groups belegen dass N>=2 -> 1 Fallback vorliegt, nutze die
+            # explizite P-04-Warnung (statt nur single_stack_fallback). Der eigentliche
+            # `fell_back_to_single_group`-Hint mit integration_lost wird nach dem Laden
+            # emittiert (dort steht valide Stack-Zahl + Metadaten fest).
+            if skipped_groups:
+                # total_exposure-basierte Hint-Vorstufe (best effort; finale Warnung nach Laden)
+                remaining = [sole_hash]
+                excluded = [s.get("group", "") for s in skipped_groups if s.get("group")]
+                # reason heuristisch: filter_excluded -> filter_typo, sonst cross_group_gate
+                _reasons = {s.get("reason", "") for s in skipped_groups}
+                _reason = "filter_typo" if any("filter" in r for r in _reasons) else "cross_group_gate"
+                total_all = sum(float(group_metadata.get(h, {}).get("total_exposure", 0) or 0) for h in set(remaining + excluded)) or None
+                total_rem = float(group_metadata.get(sole_hash, {}).get("total_exposure", 0) or 0)
+                lost_pct = round((1 - total_rem / total_all) * 100, 1) if total_all and total_all > 0 else None
+                logger.warning(
+                    "merge.fell_back_to_single_group",
+                    excluded_group=excluded[0] if len(excluded) == 1 else ",".join(excluded) if excluded else "unknown",
+                    remaining_groups=remaining,
+                    integration_lost_pct=lost_pct,
+                    reason=_reason,
+                    from_count=len(remaining) + len(excluded),
+                    to_count=1,
+                    hint=f"merge fell back to single group, {excluded[0] if excluded else 'unknown'} excluded — check cross_group gate / filter_typo",
+                )
             logger.warning("merge.single_stack_fallback", count=1, group=sole_hash, msg="Only one stack remains after quality gate — exporting single stack as merged with warning")
             # Fallthrough to load/merge path with 1 stack (copy instead of weighted average)
 
@@ -193,9 +224,95 @@ class MergeAgent:
                 group_metadata=group_metadata,
                 merge_report={"error": "insufficient_valid_stacks"},
             )
+        # P-04-Mini: Fallback-Erkennung nach Laden (valid stacks = 1, aber Eingabe/skip belegt N>=2)
+        # Beispiel M27: 2 Gruppen (4290s), eine via cross_group Gate excluded -> 2880s/4290s = 33% Verlust.
+        # Emitte WARN `merge.fell_back_to_single_group` + Feld `merge.fallback` im Report.
+        _fallback: dict | None = None
         if len(stacks) == 1:
             logger.warning("merge.single_stack_fallback_valid", count=1, stacks=stack_hashes, msg="Only one valid stack after loading — exporting as merged")
-            # Continue to merge (single stack copy/wrap)
+            # Echte Fallback-Heuristik: valid 1 + (Eingabe 2+ ODER skipped non-empty) => 2→1
+            _input_cnt = len(group_stacks)
+            _skipped_cnt = len(skipped_groups) if skipped_groups else 0
+            _total_before = _input_cnt + sum(1 for s in (skipped_groups or []) if s.get("group") not in group_stacks)
+            # Falls skipped Gruppen bereits in group_stacks fehlten, total_before faengt es
+            # Alternativ: wenn valid 1 und skipped non-empty -> immer Fallback (filter/cross_group)
+            _is_fallback = (_total_before >= 2) or (_skipped_cnt > 0) or (_input_cnt >= 2 and len(stack_hashes) == 1 and _input_cnt != len(stack_hashes))
+            # Spezial: input 2 -> valid 1 via Ladefehler (stack load failure) -> _input_cnt>=2 a reicht
+            if _input_cnt >= 2 and len(stack_hashes) == 1:
+                _is_fallback = True
+            if _is_fallback:
+                # Excluded = Gruppen aus skipped_groups + those that failed to load
+                _excluded = []
+                for s in (skipped_groups or []):
+                    g = s.get("group")
+                    if g:
+                        _excluded.append(g)
+                for h in group_stacks:
+                    if h not in stack_hashes and h not in _excluded:
+                        _excluded.append(h)
+                # Deduplicate preserve order
+                seen = set()
+                _excl_dedup = []
+                for e in _excluded:
+                    if e not in seen:
+                        seen.add(e)
+                        _excl_dedup.append(e)
+                _excluded = _excl_dedup
+                remaining = list(stack_hashes)
+                # Reason heuristisch
+                _reasons = {str(s.get("reason", "")) for s in (skipped_groups or [])}
+                if any("filter" in r.lower() for r in _reasons):
+                    _reason = "filter_typo"
+                elif any("corr" in r.lower() or "cross" in r.lower() or "below" in r.lower() for r in _reasons):
+                    _reason = "cross_group_gate"
+                elif _excluded:
+                    _reason = "cross_group_gate"
+                else:
+                    _reason = "unknown"
+                # Integration lost pct
+                try:
+                    total_all = sum(float(group_metadata.get(h, {}).get("total_exposure", 0) or 0) for h in set(remaining + _excluded)) or None
+                    # Fallback: if metadata missing (z.B. `astra merge` Standalone), nutze frame_count
+                    if not total_all or total_all == 0:
+                        total_all = sum(float(group_metadata.get(h, {}).get("frame_count", 0) or 0) for h in set(remaining + _excluded)) or None
+                    total_rem = sum(float(group_metadata.get(h, {}).get("total_exposure", 0) or 0) for h in remaining) or sum(float(group_metadata.get(h, {}).get("frame_count", 0) or 0) for h in remaining) or 0
+                    if total_all and total_all > 0:
+                        lost_pct = round((1 - total_rem / total_all) * 100, 1)
+                    else:
+                        lost_pct = None
+                except Exception:
+                    lost_pct = None
+                # Wenn noch nicht bereits via Eingabe-Pfad geloggt (skipped input 1), jetzt loggen
+                # Vermeide Doppel-Log wenn Eingabe bereits 1+skipped und dort schon geloggt: nur wenn input>=2 oder noch nicht geloggt
+                # Wir loggen hier immer als finale Instanz (nach Laden) — duplikatfrei via einmaliger Emission pro Run
+                # Pruefe ob Eingabe-Pfad bereits fell_back geloggt hat: wenn group_stacks initial 1, ist dort geloggt; hier nicht erneut wenn _input_cnt==1 und bereits geloggt
+                should_log = not (_input_cnt == 1 and _skipped_cnt > 0)  # bereits oben geloggt
+                # Bei Lade-Fallback (input 2 -> valid 1) immer loggen
+                if _input_cnt >= 2:
+                    should_log = True
+                if should_log:
+                    logger.warning(
+                        "merge.fell_back_to_single_group",
+                        excluded_group=_excluded[0] if len(_excluded) == 1 else ",".join(_excluded) if _excluded else "unknown",
+                        excluded_groups=_excluded,
+                        remaining_groups=remaining,
+                        integration_lost_pct=lost_pct,
+                        reason=_reason,
+                        from_count=len(remaining) + len(_excluded),
+                        to_count=len(remaining),
+                        hint=f"merge fell back to single group, {_excluded[0] if _excluded else 'unknown'} excluded — check cross_group gate / filter_typo",
+                    )
+                # Report-Feld fuer merge_report.json / agent-log.yaml
+                _fallback = {
+                    "from": len(remaining) + len(_excluded),
+                    "to": len(remaining),
+                    "excluded": _excluded[0] if len(_excluded) == 1 else _excluded,
+                    "excluded_groups": _excluded,
+                    "remaining_groups": remaining,
+                    "reason": _reason,
+                    "integration_lost_pct": lost_pct,
+                }
+                # Auch via multi_group Pfad wird merge.fallback im mg_metadata persistiert (archive.py)
 
         # ── 2. Validate shapes ──────────────────────────────
         shapes = [s.shape for s in stacks]
@@ -226,12 +343,20 @@ class MergeAgent:
             merge_config,
             ref_hash,
             stack_hashes,
+            context=context,
         )
 
-        # ── 6. Create preview JPG ───────────────────────────
-        preview_path = self._create_preview(merged_path, safe_name, preview_config=preview_config)
+        # ── 6. Create preview (format-aware, V1.12) ────────
+        _fmt = "tiff"
+        try:
+            _fmt = getattr(self.config.preview, "format", "tiff") if self.config and getattr(self.config, "preview", None) else "tiff"
+        except Exception:
+            _fmt = "tiff"
+        preview_path = self._create_preview(merged_path, safe_name, preview_config=preview_config, preview_format=_fmt)
 
         # ── 7. Build merge report ──────────────────────────
+        # _fallback wurde oben (P-04) bei single-stack Fallback befuellt
+        _fallback_for_report = locals().get("_fallback")
         merge_report = self._build_merge_report(
             merge_config,
             ref_hash,
@@ -245,7 +370,12 @@ class MergeAgent:
             cross_group_registrations,
             skipped_groups,
             reference_selection,
+            fallback=_fallback_for_report,
         )
+        # P-04: Sync _fallback in Report falls _build_merge_report ihn nicht gesetzt (z.B. None)
+        if _fallback_for_report and "merge.fallback" not in merge_report:
+            merge_report["merge.fallback"] = _fallback_for_report
+            merge_report["fallback"] = _fallback_for_report
 
         # ── 8. Write merge_report.json ──────────────────────
         self._write_report(merge_report)
@@ -382,11 +512,14 @@ class MergeAgent:
         merge_config: MergeConfig,
         ref_hash: str,
         all_hashes: list[str],
+        context=None,
     ) -> None:
-        """Propagate FITS headers from reference group to merged output.
+        """V1.12-HEADER: Replace propagation with build_effective_header (S1-S5, S3 fallback).
 
-        Sets WCS keys, OBJECT/TELESCOP/INSTRUME/RA/DEC from reference,
-        and MG*-keys documenting the merge.
+        Uses reference group (signal-selected) + MG* + summierte EXPTIME;
+        Fallback S3: wenn context is None (astra merge standalone) -> raw_cards aus ref_header via HEADER_ALIASES.
+
+        Sets WCS keys, OBJECT/TELESCOP/INSTRUME/RA/DEC/XPIXSZ effective etc via SSOT header_utils.
 
         Args:
             merged_path: Path to the merged FITS to update.
@@ -395,6 +528,7 @@ class MergeAgent:
             merge_config: Merge configuration for method/weight_by headers.
             ref_hash: Reference group hash.
             all_hashes: All group hashes in sorted order.
+            context: ObservationContext for S4 group filtering; None -> use ref_header (S3)
         """
         if ref_hash not in group_stacks or not group_stacks[ref_hash].exists():
             logger.warning("merge.header_propagation_no_ref", hash=ref_hash)
@@ -402,37 +536,165 @@ class MergeAgent:
 
         ref_path = group_stacks[ref_hash]
         try:
-            with fits.open(ref_path) as src:
-                with fits.open(merged_path, mode="update") as tgt:
-                    # WCS keys from reference (incl. REG_ROT from V1.5-4)
-                    wcs_keys = [
-                        "CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2",
-                        "CDELT1", "CDELT2", "CTYPE1", "CTYPE2",
-                        "CUNIT1", "CUNIT2",
-                        "REG_ROT",
-                    ]
-                    for key in wcs_keys:
-                        if key in src[0].header:
-                            tgt[0].header[key] = src[0].header[key]
-
-                    # OBJECT, TELESCOP, INSTRUME, RA, DEC from reference
-                    for key in ["OBJECT", "TELESCOP", "INSTRUME", "RA", "DEC"]:
-                        if key in src[0].header:
-                            tgt[0].header[key] = src[0].header[key]
-
-                    # Multi-group headers
-                    total_exp = sum(
-                        meta.get("total_exposure", 0)
-                        for meta in group_metadata.values()
-                    )
-                    tgt[0].header["EXPTIME"] = float(total_exp)
-                    tgt[0].header["GAIN"] = "MULTI"
-                    tgt[0].header["FILTER"] = "MULTI"
-                    tgt[0].header["MGCNTGRP"] = len(all_hashes)
-                    tgt[0].header["MGREFGRP"] = ref_hash
-                    tgt[0].header["MGMETHOD"] = merge_config.method
-                    tgt[0].header["MGWTBY"] = merge_config.weight_by
-                    tgt[0].header["MGVER"] = "1.0"
+            # Determine method/scale for merged inherits effective from ref (S1)
+            # Infer from ref header DEBAYER/XBINNING/XPIXSZ after stacked annotation
+            ref_hdr = None
+            try:
+                with fits.open(ref_path) as src:
+                    ref_hdr = src[0].header.copy()
+            except Exception:
+                ref_hdr = None
+            method = "superpixel"
+            scale_window = 2.0
+            drizzle_scale = 2.0
+            if ref_hdr is not None:
+                debayer = str(ref_hdr.get("DEBAYER", "")).lower()
+                if debayer in ("malvar2004", "malvar", "bilinear"):
+                    method = "malvar2004" if "malvar" in debayer else "bilinear"
+                    scale_window = 1.0
+                elif debayer == "drizzle":
+                    method = "drizzle"
+                    try:
+                        drizzle_scale = float(ref_hdr.get("DRZSCALE", 2.0))
+                    except Exception:
+                        drizzle_scale = 2.0
+                else:
+                    # Fallback via XBINNING or XPIXSZ
+                    try:
+                        xbin = int(ref_hdr.get("XBINNING", 2))
+                        if xbin == 1:
+                            # Could be malvar or drizzle; check XPIXSZ ~1.45 for drizzle
+                            xpix = float(ref_hdr.get("XPIXSZ", 5.8))
+                            if abs(xpix - 1.45) < 0.2:
+                                method = "drizzle"
+                            else:
+                                method = "malvar2004"
+                                scale_window = 1.0
+                        else:
+                            method = "superpixel"
+                    except Exception:
+                        method = "superpixel"
+            # Summed EXPTIME
+            total_exp = sum(float(meta.get("total_exposure", 0) or 0) for meta in group_metadata.values())
+            # Determine wcs from context or ref_hdr
+            wcs = None
+            if ref_hdr is not None:
+                # Try to use RA/DEC/PIXELS from ref_hdr
+                try:
+                    ra = ref_hdr.get("RA")
+                    dec = ref_hdr.get("DEC")
+                    # Use CDELT to infer pixel_scale if available
+                    cdelt = ref_hdr.get("CDELT2", 0)
+                    if ra is not None and dec is not None:
+                        ps = abs(float(cdelt)) * 3600.0 if cdelt else 0.0
+                        if ps > 0:
+                            wcs = {"ra": float(ra), "dec": float(dec), "pixel_scale_arcsec": float(ps)}
+                        else:
+                            # Fallback compute via XPIXSZ/FOCALLEN
+                            try:
+                                xpix = float(ref_hdr.get("XPIXSZ", 2.9))
+                                focal = float(ref_hdr.get("FOCALLEN", 150.0))
+                                if focal > 0:
+                                    ps2 = 206.265 * xpix / focal
+                                    wcs = {"ra": float(ra), "dec": float(dec), "pixel_scale_arcsec": float(ps2)}
+                            except Exception:
+                                wcs = {"ra": float(ra), "dec": float(dec), "pixel_scale_arcsec": 0.0}
+                except Exception:
+                    wcs = None
+            # Build effective header via SSOT (S1-S5)
+            from ..core.header_utils import annotate_fits, build_effective_header
+            # Determine merged NAXIS for S5 CRPIX
+            naxis = None
+            try:
+                with fits.open(merged_path) as mhdul:
+                    n1 = mhdul[0].header.get("NAXIS1")
+                    n2 = mhdul[0].header.get("NAXIS2")
+                    if n1 and n2:
+                        naxis = (int(n1), int(n2))
+                    elif mhdul[0].data is not None:
+                        d = mhdul[0].data
+                        if d.ndim == 3:
+                            naxis = (d.shape[2], d.shape[1]) if d.shape[0] == 3 else (d.shape[-1], d.shape[-2])
+                        else:
+                            naxis = (d.shape[1], d.shape[0])
+            except Exception:
+                naxis = None
+            # Build header: context if available, else ref_header fallback (S3)
+            if context is not None:
+                # Try group-filtered context shim for S4
+                eff_ctx = context
+                if ref_hash:
+                    try:
+                        from ..models.core import compute_group_hash as _cgh
+                        from types import SimpleNamespace
+                        from ..models.core import FrameSet as _FS, FrameType as _FT
+                        lights = context.get_lights()  # type: ignore
+                        if lights and hasattr(lights, "group_by_params"):
+                            gmap = lights.group_by_params()
+                            for gk, fs in gmap.items():
+                                try:
+                                    gh = _cgh(float(gk[0]), int(gk[1]), str(gk[2]))
+                                except Exception:
+                                    continue
+                                if gh == ref_hash and fs.frames:
+                                    filtered_fs = _FS(frame_type=_FT.LIGHT, frames=list(fs.frames))
+                                    eff_ctx = SimpleNamespace(get_lights=lambda fs=filtered_fs: fs, target=getattr(context, "target", None), frames={_FT.LIGHT: filtered_fs})
+                                    break
+                    except Exception:
+                        eff_ctx = context
+                hdr = build_effective_header(eff_ctx, method=method, scale_window=scale_window, drizzle_scale=drizzle_scale, wcs=wcs, total_exposure=total_exp, naxis=naxis)
+            else:
+                # Fallback S3: context is None (astra merge standalone) -> raw_cards from ref_header via HEADER_ALIASES
+                hdr = build_effective_header(None, method=method, scale_window=scale_window, drizzle_scale=drizzle_scale, wcs=wcs, total_exposure=total_exp, ref_header=ref_hdr, naxis=naxis)
+            # Fallback copy WCS keys from ref_hdr if build didn't produce them (e.g., test with only CRVAL but no RA/FOCALLEN)
+            if ref_hdr is not None:
+                for _k in ["CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2", "CDELT1", "CDELT2", "CTYPE1", "CTYPE2", "CUNIT1", "CUNIT2", "REG_ROT"]:
+                    if _k in ref_hdr and _k not in hdr:
+                        try:
+                            hdr[_k] = ref_hdr[_k]
+                        except Exception:
+                            pass
+                # Also copy OBJECT etc if missing
+                for _k in ["OBJECT", "TELESCOP", "INSTRUME", "RA", "DEC"]:
+                    if _k in ref_hdr and _k not in hdr:
+                        try:
+                            hdr[_k] = ref_hdr[_k]
+                        except Exception:
+                            pass
+            # Add MG* + HISTORY kumuliert (OQ-3)
+            hdr["MGCNTGRP"] = len(all_hashes)
+            hdr["MGREFGRP"] = ref_hash
+            hdr["MGMETHOD"] = merge_config.method
+            hdr["MGWTBY"] = merge_config.weight_by
+            hdr["MGVER"] = "1.0"
+            hdr["MERGED"] = True
+            try:
+                hdr.add_history(f"Merged {len(all_hashes)} groups via {merge_config.method}")
+            except Exception:
+                pass
+            # Ensure MULTI for heterogeneous GAIN/FILTER (merge spec: MULTI when heterogen, else single)
+            # Determine if heterogen
+            try:
+                gains = set(str(m.get("gain")) for m in group_metadata.values() if m.get("gain") is not None)
+                filters = set(str(m.get("filter")) for m in group_metadata.values() if m.get("filter") not in (None, "none", ""))
+                if len(gains) > 1 or len(filters) > 1:
+                    hdr["GAIN"] = "MULTI"
+                    hdr["FILTER"] = "MULTI"
+                else:
+                    # Keep single value if homogeneous (preserve from ref)
+                    if "GAIN" not in hdr or hdr["GAIN"] in (None, ""):
+                        # Fallback single
+                        single_gain = next(iter(gains)) if gains else None
+                        if single_gain:
+                            hdr["GAIN"] = single_gain
+                    if "FILTER" not in hdr or hdr["FILTER"] in (None, ""):
+                        single_f = next(iter(filters)) if filters else None
+                        if single_f:
+                            hdr["FILTER"] = single_f
+            except Exception:
+                hdr["GAIN"] = "MULTI"
+                hdr["FILTER"] = "MULTI"
+            annotate_fits(merged_path, hdr)
         except Exception as e:
             logger.warning("merge.header_propagation_failed", error=str(e))
 
@@ -440,26 +702,34 @@ class MergeAgent:
     def _create_preview(
         merged_path: Path, safe_name: str,
         preview_config: Optional["PreviewExportConfig"] = None,
+         preview_format: str = "tiff",
     ) -> Optional[Path]:
-        """Create auto-stretched JPG preview from merged FITS.
+        """Create auto-stretched preview from merged FITS — format-aware.
+
+        V1.12-PREVIEW-FORMAT: TIFF 16-bit Default / JPG Fallback.
 
         Args:
             merged_path: Path to the merged FITS.
             safe_name: Sanitised target name for output filename.
             preview_config: V1.8-2 Preview/Export-Pipeline Einstellungen.
+            preview_format: "tiff" (Default) or "jpg".
 
         Returns:
-            Path to preview JPG, or None on failure.
+            Path to preview, or None on failure.
         """
-        jpg_dir = merged_path.parent
-        jpg_path = jpg_dir / f"{safe_name}_merged_preview.jpg"
+        fmt = str(preview_format).strip().lower() if isinstance(preview_format, str) else "tiff"
+        if fmt not in ("tiff", "jpg"):
+            fmt = "tiff"
+        ext = ".tiff" if fmt == "tiff" else ".jpg"
+        preview_dir = merged_path.parent
+        preview_path = preview_dir / f"{safe_name}_merged_preview{ext}"
         try:
-            result = create_preview_jpg(
-                merged_path, jpg_path,
+            result = create_preview(
+                merged_path, preview_path, format=fmt,
                 preview_config=preview_config,
             )
             if result:
-                logger.info("merge.preview_created", path=str(jpg_path))
+                logger.info("merge.preview_created", path=str(preview_path), format=fmt)
             return result
         except Exception as e:
             logger.warning("merge.preview_failed", error=str(e))
@@ -479,6 +749,7 @@ class MergeAgent:
         cross_group_registrations: Optional[list[dict]] = None,
         skipped_groups: Optional[list[dict]] = None,
         reference_selection: Optional[dict] = None,
+        fallback: Optional[dict] = None,
     ) -> dict:
         """Build merge report dict conforming to architecture schema §5.3.
 
@@ -599,6 +870,13 @@ class MergeAgent:
             if isinstance(gr, dict) and gr:
                 gr_block[gh] = gr
         report["gradient_removal"] = gr_block
+
+        # P-04-Mini (V1.12-FU-3): Merge Fallback — Single-Stack nach Gate/Filter
+        # Persistiert als `merge.fallback` + `fallback` (grep `merge\.fallback`).
+        # Beispiel M27: 2 Gruppen (4290s) -> 1 (2880s) = 33% Verlust durch cross_group_gate.
+        if fallback:
+            report["merge.fallback"] = dict(fallback)
+            report["fallback"] = dict(fallback)
 
         return report
 

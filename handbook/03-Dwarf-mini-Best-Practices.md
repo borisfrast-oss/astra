@@ -1,6 +1,6 @@
-# 03 – Dwarf mini Best Practices (formerly dwarf3)
+# 03 – Dwarf mini Best Practices
 
-# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini` (alias `dwarf3` deprecated since V19)
+# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini`
 
 ---
 
@@ -8,7 +8,7 @@
 
 This chapter describes the optimal acquisition and processing strategies for the Dwarf mini.
 
-> **Note (V19):** Since V19 the profile is named `dwarf_mini`; `dwarf3` remains as a deprecated alias for compatibility. Hardware identical.
+> **Note:** The equipment profile is named `dwarf_mini`; `dwarf3` is a deprecated alias (kept for backward compatibility).
 
 Topics covered:
 
@@ -560,7 +560,7 @@ Especially important:
 
 ---
 
-# 21. Typical Dwarf mini Issues (formerly dwarf3)
+# 21. Typical Dwarf mini Issues
 
 ## Image completely black
 

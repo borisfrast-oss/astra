@@ -77,15 +77,15 @@ class TestNormalizeValueDef003:
 
 
 class TestComputeGroupHashDef003:
-    """DEF-003: Gruppen-Hashes behalten den vollen Filter-Namen."""
+    """DEF-003: Gruppen-Hashes klein-normiert (V1.12-ORGANIZE A1, Boris-Entscheid 2)."""
 
     def test_group_hash_duo_band(self):
-        """(120, 40, 'Duo-Band') -> '120s40_Duo-Band' (vorher '120s40_Duo-')."""
-        assert compute_group_hash(120, 40, "Duo-Band") == "120s40_Duo-Band"
+        """(120, 40, 'Duo-Band') -> '120s40_duo-band' (klein-normiert)."""
+        assert compute_group_hash(120, 40, "Duo-Band") == "120s40_duo-band"
 
     def test_group_hash_astro(self):
-        """(30, 40, 'Astro') -> '30s40_Astro' (vorher '30s40')."""
-        assert compute_group_hash(30, 40, "Astro") == "30s40_Astro"
+        """(30, 40, 'Astro') -> '30s40_astro' (klein-normiert)."""
+        assert compute_group_hash(30, 40, "Astro") == "30s40_astro"
 
 
 class TestParseFitsHeaderDef003:

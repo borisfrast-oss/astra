@@ -3,16 +3,14 @@
 
 **Version:** 1.1  
 **Date:** 2026-09  
-**Profile:** `dwarf_mini` (alias `dwarf3` deprecated since V19 — hardware identical, 2.9 µm pixel, 150 mm focal length)
+**Profile:** `dwarf_mini` (2.9 µm pixel, 150 mm focal length; `dwarf3` is a deprecated alias)
 
 **Workflow:**
 
-- DwarfLab Dwarf mini (formerly `dwarf3`)
+- DwarfLab Dwarf mini
 - Siril 1.4.4
 - GraXpert
 - GIMP 3.x
-
-> **Note (V19):** Since V19 the profile is named `dwarf_mini`; `dwarf3` remains as a deprecated alias for compatibility.
 
 ---
 
@@ -457,7 +455,7 @@ README.md
 ## Version 1.1 (2026-09)
 
 - English translation of all 36 chapters (§17)
-- `dwarf3` → `dwarf_mini` rename (profile `dwarf_mini`, alias `dwarf3` deprecated since V19, hardware identical)
+- `dwarf_mini` profile consolidation (deprecated alias `dwarf3` kept for backward compatibility)
 - V19 addendum integrated: REG-SMART, CFA-GATE, PCC-FLAG, ghosting guard and Duo-Band Rosa fix (Ch. 06/07/08/15/22/23)
 - Chapter file names DE → EN (git mv, 36 files)
 
@@ -467,7 +465,7 @@ Initial structured version.
 
 Basis:
 
-* Dwarf mini (formerly `dwarf3`)
+* DwarfLab Dwarf mini
 * Siril 1.4.4
 * GraXpert
 * GIMP

@@ -28,7 +28,7 @@ from scipy.ndimage import gaussian_filter
 from scipy.ndimage import shift as scipy_shift
 
 from ..config.models import FrameSelectionConfig, MultiGroupConfig, PipelinePreset
-from ..config.loader import is_merge_filter_match, normalize_merge_filters
+from ..core.merge_filter import is_merge_filter_match, normalize_merge_filters
 from ..core.export import annotate_export_header
 from ..core.gradient_removal import background_extraction
 from ..core.pcc import compute_pixel_scale, photometric_color_calibration
@@ -134,7 +134,7 @@ def signal_winner_if_any(
 
     Gibt den Kandidaten mit der strikt größten Score zurück, sofern die
     Wahl deterministisch ist (kein Gleichstand, mind. ein Kandidat
-    ≥ 3 Frames); sonst None. Gleiche Logik wie in
+    >= 3 Frames); sonst None. Gleiche Logik wie in
     select_reference_group (strategy="signal"), ohne frame_count-Tiebreak.
 
     Refactor: moved from ``ProcessingAgent._signal_winner_if_any``

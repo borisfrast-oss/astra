@@ -36,11 +36,14 @@ from scipy.ndimage import gaussian_filter
 from scipy.ndimage import shift as scipy_shift
 
 from ..config.loader import (
-    is_merge_filter_match,
-    normalize_merge_filters,
     resolve_cfa_drizzle,
     resolve_export_config,
     resolve_preview_export_config,
+)
+from ..core.merge_filter import (
+    check_filter_typos,
+    is_merge_filter_match,
+    normalize_merge_filters,
 )
 from ..config.models import (
     CFADrizzleConfig,
@@ -51,7 +54,7 @@ from ..core.debayer import debayer_fits
 from ..core.export import annotate_export_header, export_stretched_fits
 from ..core.gradient_removal import background_extraction
 from ..core.pcc import compute_pixel_scale, photometric_color_calibration
-from ..core.preview import create_preview_jpg
+from ..core.preview import create_preview, create_preview_jpg
 from ..core.quality import (
     FrameQuality,
     qual_to_dict,
@@ -846,8 +849,9 @@ class MultiGroupProcessor:
         self.last_registration_metrics: dict = {}
         # ray Review Fix 1 (2026-08-21): PCC-Status des MERGED-Pfad-Laufs
         # (pcc_per_group=False). Der Return von _apply_pcc_per_group wurde
-        # previously verworfen -> pcc_status blieb "pending" und erreichte
+        # previously verworfen -> pcc_status blieb None und erreichte
         # agent-log.yaml/run-info.json nie (z.B. rejected_implausible_factors).
+        # V1.12-FU-2: Stub "pending" entfällt — nicht-durchgeführt = None.
         self.last_merged_pcc_status: str | None = None
 
         # Test-/Hook-Pfad: Der Agent reicht seine (ggf. gepatchten)
@@ -998,6 +1002,10 @@ class MultiGroupProcessor:
         # 1. Discover groups from context metadata
         discovery = DiscoveryAgent(self.config)
         groups: dict[str, GroupInfo] = discovery.discover_groups(context)
+        # V1.12-GROUP-SELECT (GROUP-SEL-3): stage_input bereits gefiltert → groups ist bereits selektiv; Logging ergänzen
+        _sel = getattr(self.config, "_selected_groups", None) if self.config else None
+        if _sel is not None:
+            self.logger.info("multi_group.group_selection", selected=_sel, discovered=list(groups.keys()))
         self.logger.info("multi_group.start", group_count=len(groups), groups=list(groups.keys()))
 
         if len(groups) == 0:
@@ -1260,7 +1268,10 @@ class MultiGroupProcessor:
                     # Quality Gate filtering (nur non-outlier) before drizzle (AC-DRZ-5)
                     from ..agents.cfa_drizzle_agent import (
                         cfa_drizzle,
+                        compute_n_distinct_phases,
                         compute_pixfrac,
+                        compute_weight_map_stats,
+                        predict_expected_phases,
                         register_cfa_subpixel,
                     )
                     from ..core.quality import compute_frame_quality, reject_outlier_frames
@@ -1371,11 +1382,8 @@ class MultiGroupProcessor:
                             good_idx = [i for i, q in enumerate(filtered) if not getattr(q, "outlier_excluded", False)]
                         good_frames = [cfa_frames[i] for i in good_idx]
                         n_out = len(good_frames)
-                        # Dithering scale/pixfrac from drz_cfg
-                        if drz_cfg.pixfrac_mode == "fixed":
-                            pixfrac = float(drz_cfg.pixfrac)
-                        else:
-                            pixfrac = compute_pixfrac(n_out, scale=float(drz_cfg.scale))
+                        # Dithering scale/pixfrac V1.12: phases after shifts (COV-1), keep guard first
+                        # pixfrac will be computed AFTER shifts (n_distinct_phases overlay)
                         # min_frames Guard + fallback (AC-DRZ-6)
                         if n_out < drz_cfg.min_frames:
                             fb = drz_cfg.fallback
@@ -1456,7 +1464,113 @@ class MultiGroupProcessor:
                                     shifts.append((sy, sx))
                                 except Exception:
                                     shifts.append((0.0, 0.0))
-                            rgb = cfa_drizzle(good_frames, shifts, scale=float(drz_cfg.scale), pixfrac=pixfrac, kernel=drz_cfg.kernel)
+                            # V1.12-DRZ-COVERAGE COV-1: n_distinct_phases (Shift-Histogramm, 0.25 bin) -> pixfrac
+                            # V1.12-Zwischen-Check 08.09.2026: Bin 0.25 überschätzt (14 vs 2).
+                            # Robuste Entscheidung via predict_expected_phases (Cadence 10 für >=60s)
+                            # oder konservativ <30F →1.0. Hier: predicted vs measured, nimm das kleinere
+                            # (phasenarme Realität), und logge beide für Diagnose.
+                            try:
+                                n_distinct_phases = compute_n_distinct_phases(shifts, bin_size=0.5)
+                            except Exception:
+                                n_distinct_phases = 0
+                            # Predicted phases aus EXPTIME + Framezahl (COV-4)
+                            try:
+                                # exptime aus group_metadata (info.key[0]) — fallback 60s
+                                _exptime_for_pred = None
+                                try:
+                                    _exptime_for_pred = float(info.key[0]) if info and len(info.key) > 0 else None
+                                except Exception:
+                                    _exptime_for_pred = None
+                                n_expected = predict_expected_phases(n_out, _exptime_for_pred)
+                            except Exception:
+                                n_expected = None
+                            # Entscheide pixfrac: wenn predicted < measured deutlich, nutze predicted
+                            # (z.B. M92 15F: measured 14, predicted 2 → 2 → pixfrac 1.0)
+                            # V1.12-Nachfix: bin 0.5 reduziert Überzählung (32→~8), zusätzlich hole-gesteuert unten
+                            _pixfrac_n_distinct = n_distinct_phases
+                            if n_expected is not None:
+                                try:
+                                    # Wenn predicted < measured und predicted <4, bevorzuge predicted (phasenarm)
+                                    # Generell nimm min(measured, predicted) für konservative Coverage
+                                    # V1.12-Nachfix: Faktor >3 divergenz → predicted gewinnt (z.B. 32 vs 5)
+                                    if int(n_expected) < int(n_distinct_phases):
+                                        self.logger.info(
+                                            "cfa_drizzle.predicted_vs_measured",
+                                            group=group_hash,
+                                            n_distinct_measured=int(n_distinct_phases),
+                                            n_expected=int(n_expected),
+                                            exptime=_exptime_for_pred,
+                                            chosen=min(int(n_distinct_phases), int(n_expected)),
+                                        )
+                                        _pixfrac_n_distinct = min(int(n_distinct_phases), int(n_expected))
+                                except Exception:
+                                    pass
+                            if drz_cfg.pixfrac_mode == "fixed":
+                                pixfrac = float(drz_cfg.pixfrac)
+                            else:
+                                pixfrac = compute_pixfrac(
+                                    n_out, scale=float(drz_cfg.scale), n_distinct_phases=_pixfrac_n_distinct
+                                )
+                            # Log shift list + phase stats (COV-3) and weight-map will be logged by cfa_drizzle itself
+                            try:
+                                shift_list = [[round(float(sy),4), round(float(sx),4)] for sy,sx in shifts]
+                                phase_stats = {
+                                    "distinct": int(n_distinct_phases),
+                                    "min_y": round(float(min(s[0] for s in shifts)),4) if shifts else 0.0,
+                                    "max_y": round(float(max(s[0] for s in shifts)),4) if shifts else 0.0,
+                                    "min_x": round(float(min(s[1] for s in shifts)),4) if shifts else 0.0,
+                                    "max_x": round(float(max(s[1] for s in shifts)),4) if shifts else 0.0,
+                                }
+                            except Exception:
+                                shift_list = []
+                                phase_stats = {"distinct": int(n_distinct_phases)}
+                            self.logger.info(
+                                "cfa_drizzle.shifts",
+                                group=group_hash,
+                                shifts=shift_list,
+                                n_distinct_phases=int(n_distinct_phases),
+                                phase_stats=phase_stats,
+                                pixfrac=float(pixfrac),
+                            )
+                            # Call drizzle with stats (V1.12 COV-2/COV-3)
+                            _drizzle_res = cfa_drizzle(good_frames, shifts, scale=float(drz_cfg.scale), pixfrac=pixfrac, kernel=drz_cfg.kernel, return_stats=True)
+                            if isinstance(_drizzle_res, tuple) and len(_drizzle_res) == 5:
+                                rgb, weight_map, _nd2, _ps2, _sl2 = _drizzle_res  # type: ignore
+                                # Use returned stats (authoritative, includes hole calc)
+                                phase_stats = _ps2  # type: ignore
+                                shift_list = _sl2  # type: ignore
+                                # n_distinct already computed; keep consistency
+                            else:
+                                rgb = _drizzle_res  # type: ignore
+                                # Fallback weight_map via empty
+                                try:
+                                    weight_map = compute_weight_map_stats(
+                                        np.zeros((2,2), dtype=np.float32),
+                                        np.zeros((2,2), dtype=np.float32),
+                                        np.zeros((2,2), dtype=np.float32),
+                                    )
+                                except Exception:
+                                    weight_map = {"min": 0.0, "median": 0.0, "hole_fraction_pct": 0.0}
+                            # Hole-gesteuerter Fallback (V1.12-Nachfix 09.09.): wenn hole >5% trotz pixfrac <1.0 → 1.0 erzwingen
+                            try:
+                                _hole_pct = float(weight_map.get("hole_fraction_pct", 0)) if isinstance(weight_map, dict) else 0.0
+                                if _hole_pct > 5.0 and float(pixfrac) < 0.99 and drz_cfg.pixfrac_mode != "fixed":
+                                    self.logger.warning(
+                                        "cfa_drizzle.hole_fallback",
+                                        group=group_hash,
+                                        hole_pct=_hole_pct,
+                                        old_pixfrac=float(pixfrac),
+                                        new_pixfrac=1.0,
+                                        reason="hole >5% -> pixfrac 1.0 to avoid holes (V1.12-Nachfix)",
+                                    )
+                                    _drizzle_res2 = cfa_drizzle(good_frames, shifts, scale=float(drz_cfg.scale), pixfrac=1.0, kernel=drz_cfg.kernel, return_stats=True)
+                                    if isinstance(_drizzle_res2, tuple) and len(_drizzle_res2) == 5:
+                                        rgb, weight_map, _nd2, _ps2, _sl2 = _drizzle_res2  # type: ignore
+                                        phase_stats = _ps2  # type: ignore
+                                        shift_list = _sl2  # type: ignore
+                                        pixfrac = 1.0
+                            except Exception as _hole_e:
+                                self.logger.warning("cfa_drizzle.hole_fallback_failed", group=group_hash, error=str(_hole_e))
                             # Save to 01c_drizzle and 04_stacked (so merge uses drizzled master)
                             drizzle_dir = group_dir / "01c_drizzle"
                             drizzle_dir.mkdir(parents=True, exist_ok=True)
@@ -1471,6 +1585,45 @@ class MultiGroupProcessor:
                             hdu.header["NFRAMES"] = n_out
                             hdu.header["BAYERPAT"] = "RGGB"
                             hdu.writeto(drizzled_master_path, overwrite=True)
+                            # V1.12-HEADER-PLATESOLVING inline drizzle annotate (drizzle 1.45 + BAYERPAT/S2, OQ-2)
+                            try:
+                                from ..core.header_utils import annotate_fits as _af, build_effective_header as _beh
+                                # Per-group filtered context for S4 (group_hash)
+                                _driz_ctx = context
+                                if group_hash:
+                                    try:
+                                        from ..models.core import compute_group_hash as _cgh3
+                                        from types import SimpleNamespace
+                                        from ..models.core import FrameSet as _FS3, FrameType as _FT3
+                                        lights3 = context.get_lights()  # type: ignore
+                                        if lights3 and hasattr(lights3, "group_by_params"):
+                                            gmap3 = lights3.group_by_params()
+                                            for gk3, fs3 in gmap3.items():
+                                                try:
+                                                    gh3 = _cgh3(float(gk3[0]), int(gk3[1]), str(gk3[2]))
+                                                except Exception:
+                                                    continue
+                                                if gh3 == group_hash and fs3.frames:
+                                                    filt_fs3 = _FS3(frame_type=_FT3.LIGHT, frames=list(fs3.frames))
+                                                    _driz_ctx = SimpleNamespace(get_lights=lambda fs=filt_fs3: fs, target=getattr(context, "target", None), frames={_FT3.LIGHT: filt_fs3})
+                                                    break
+                                    except Exception:
+                                        _driz_ctx = context
+                                _driz_wcs2 = None
+                                try:
+                                    if _driz_ctx and getattr(_driz_ctx, "target", None) and _driz_ctx.target.ra is not None:
+                                        _driz_wcs2 = {"ra": _driz_ctx.target.ra, "dec": _driz_ctx.target.dec, "pixel_scale_arcsec": 0.0}
+                                except Exception:
+                                    _driz_wcs2 = None
+                                out_H_r, out_W_r = rgb.shape[0], rgb.shape[1]
+                                _hdr_driz2 = _beh(_driz_ctx, method="drizzle", scale_window=1.0, drizzle_scale=float(drz_cfg.scale), wcs=_driz_wcs2, naxis=(out_W_r, out_H_r), drizzle_pixfrac=float(pixfrac), drizzle_kernel=drz_cfg.kernel, drizzle_nframes=int(n_out))
+                                try:
+                                    _hdr_driz2.add_history(f"Astra drizzle: scale {float(drz_cfg.scale)}, pixfrac {float(pixfrac)}, kernel {drz_cfg.kernel}, {n_out} frames")
+                                except Exception:
+                                    pass
+                                _af(drizzled_master_path, _hdr_driz2)
+                            except Exception as _he3:
+                                self.logger.warning("header_annotate_failed", path=str(drizzled_master_path), error=str(_he3))
                             # Optional cfa 2D
                             try:
                                 out_H, out_W = rgb.shape[0], rgb.shape[1]
@@ -1483,19 +1636,65 @@ class MultiGroupProcessor:
                                 hdu2.header["BAYERPAT"] = "RGGB"
                                 hdu2.header["DRZSCALE"] = float(drz_cfg.scale)
                                 hdu2.writeto(drizzled_cfa_path, overwrite=True)
+                                try:
+                                    from ..core.header_utils import annotate_fits as _af2b, build_effective_header as _beh2b
+                                    out_H2b, out_W2b = cfa2d.shape[0], cfa2d.shape[1]
+                                    _hdr_cfa_b = _beh2b(_driz_ctx, method="drizzle", scale_window=1.0, drizzle_scale=float(drz_cfg.scale), wcs=_driz_wcs2, naxis=(out_W2b, out_H2b), drizzle_pixfrac=float(pixfrac), drizzle_kernel=drz_cfg.kernel, drizzle_nframes=int(n_out))
+                                    _af2b(drizzled_cfa_path, _hdr_cfa_b)
+                                except Exception as _he4:
+                                    self.logger.warning("header_annotate_failed", path=str(drizzled_cfa_path), error=str(_he4))
                             except Exception:
                                 pass
                             # Also copy to stack_dir/stacked.fits for downstream (PCC, merge)
                             stacked_path = stack_dir / "stacked.fits"
                             # Drizzled master is already RGB 3840x2160, shape matches final merge expectation
-                            # Save to stacked.fits (copy)
+                            # Save to stacked.fits (copy) — copy after annotate so stacked inherits header
                             import shutil as _sh
                             _sh.copy2(drizzled_master_path, stacked_path)
                             drizzle_stacked = stacked_path
                             drizzle_success = True
-                            drizzle_meta = {"scale": float(drz_cfg.scale), "pixfrac": float(pixfrac), "kernel": drz_cfg.kernel, "n_frames_in": n_loaded, "n_frames_out": n_out}
-                            self.logger.info("cfa_drizzle.complete", group=group_hash, scale=float(drz_cfg.scale), pixfrac=float(pixfrac), kernel=drz_cfg.kernel, n_frames_in=n_loaded, n_frames_out=n_out)
-                            cfa_drizzle_results[group_hash] = {"scale": float(drz_cfg.scale), "pixfrac": float(pixfrac), "kernel": drz_cfg.kernel, "n_frames_in": n_loaded, "n_frames_out": n_out, "status": "ok"}
+                            # S1: effective stack_scale_factor for drizzle is 1/scale (2.0 -> 0.5 -> 1.45um) — not 2.0
+                            try:
+                                group_stack_scale_factor = 1.0 / float(drz_cfg.scale) if float(drz_cfg.scale) != 0 else 0.5
+                            except Exception:
+                                group_stack_scale_factor = 0.5
+                            drizzle_meta = {
+                                "scale": float(drz_cfg.scale),
+                                "pixfrac": float(pixfrac),
+                                "kernel": drz_cfg.kernel,
+                                "n_frames_in": n_loaded,
+                                "n_frames_out": n_out,
+                                "n_distinct_phases": int(n_distinct_phases),
+                                "phase_stats": phase_stats,
+                                "shifts": shift_list,
+                                "weight_map": weight_map,
+                                "stack_scale_factor": float(group_stack_scale_factor),
+                            }
+                            self.logger.info(
+                                "cfa_drizzle.complete",
+                                group=group_hash,
+                                scale=float(drz_cfg.scale),
+                                pixfrac=float(pixfrac),
+                                kernel=drz_cfg.kernel,
+                                n_frames_in=n_loaded,
+                                n_frames_out=n_out,
+                                n_distinct_phases=int(n_distinct_phases),
+                                phase_stats=phase_stats,
+                                shifts=shift_list,
+                                weight_map=weight_map,
+                            )
+                            cfa_drizzle_results[group_hash] = {
+                                "scale": float(drz_cfg.scale),
+                                "pixfrac": float(pixfrac),
+                                "kernel": drz_cfg.kernel,
+                                "n_frames_in": n_loaded,
+                                "n_frames_out": n_out,
+                                "status": "ok",
+                                "n_distinct_phases": int(n_distinct_phases),
+                                "phase_stats": phase_stats,
+                                "shifts": shift_list,
+                                "weight_map": weight_map,
+                            }
                 except RuntimeError as e:
                     if str(e) == "cfa_drizzle_skip_group":
                         # Ensure finally runs then we skip group
@@ -1675,11 +1874,31 @@ class MultiGroupProcessor:
                                 "rejection_thresholds": {},
                             }
 
+                    # V1.12-HEADER-PLATESOLVING S1+S4: header annotation for stacked (context gefiltert per group_hash, scale_window/drizzle_scale, wcs)
+                    _debayer_method_for_stack = "superpixel"
+                    try:
+                        if debayer_result is not None and getattr(debayer_result, "method", None):
+                            _debayer_method_for_stack = str(debayer_result.method).lower()
+                        elif _group_proc_params.get("debayer_method"):
+                            _debayer_method_for_stack = str(_group_proc_params.get("debayer_method")).lower()
+                    except Exception:
+                        _debayer_method_for_stack = "superpixel"
+                    # Determine wcs for this group (ra/dec from target, pixel_scale via fallback if PCC not yet)
+                    _stack_wcs = None
+                    try:
+                        if context and context.target and context.target.ra is not None and context.target.dec is not None:
+                            _stack_wcs = {"ra": context.target.ra, "dec": context.target.dec, "pixel_scale_arcsec": 0.0}
+                    except Exception:
+                        _stack_wcs = None
                     stacked = stack_frames(
                         registered, _group_proc_params, is_3d=group_is_3d,
                         stacked_dir=self.stacked_dir,
                         load_frame=self.load_frame,
                         save_frame=self.save_frame,
+                        context=context,
+                        debayer_method=_debayer_method_for_stack,
+                        wcs=_stack_wcs,
+                        group_hash=group_hash,
                     )
             except Exception as e:
                 # F-01: logger.error -> warning (_LogRecorder hat kein error())
@@ -1734,7 +1953,7 @@ class MultiGroupProcessor:
                 "filter": filter_name if filter_name not in ("none", "") else None,
                 "total_exposure": info.total_exposure,
                 "weight": weight,
-                "pcc_status": "pending",
+                "pcc_status": None,
                 "dark_source": dark_source,
                 # QF-B (AC-QF-B1/B2): je Frame + Stack-Zusammenfassung.
                 # Fliesst additiv in agent-log (via multi_group_metadata)
@@ -1794,20 +2013,28 @@ class MultiGroupProcessor:
         # preview_paths wird an den Skip-Filter durchgereicht, damit
         # skipped_groups[].preview_path auf diese Previews zeigt.
         preview_paths: dict[str, Path] = {}
+        # V1.12-PREVIEW-FORMAT: Format aus Config (CLI > Config > Default tiff)
+        _preview_fmt = "tiff"
+        try:
+            _preview_fmt = getattr(self.config.preview, "format", "tiff") if self.config and getattr(self.config, "preview", None) else "tiff"
+        except Exception:
+            _preview_fmt = "tiff"
+        _preview_ext = ".tiff" if str(_preview_fmt).lower() == "tiff" else ".jpg"
         for group_hash, stacked_path in group_stacks.items():
             info = groups[group_hash]
             group_dir = (info.working_dir
                          if info.working_dir
                          else self.working_dir / f"group_{group_hash}")
             try:
-                preview_path = create_preview_jpg(
+                preview_path = create_preview(
                     stacked_path,
-                    group_dir / "04_stacked" / f"preview_{group_hash}.jpg",
+                    group_dir / "04_stacked" / f"preview_{group_hash}{_preview_ext}",
+                    format=_preview_fmt,
                     preview_config=preview_cfg,
                 )
                 if preview_path is None:
                     self.logger.warning("multi_group.preview_failed", hash=group_hash,
-                                        reason="create_preview_jpg_returned_none")
+                                        reason="create_preview_returned_none")
                 else:
                     preview_paths[group_hash] = preview_path
             except Exception as e:
@@ -1846,24 +2073,20 @@ class MultiGroupProcessor:
                     candidates=sorted(candidate_hashes),
                     excluded=[e["group"] for e in filter_excluded_skipped],
                 )
-            # V1.7-1 FSM-C3: Tippfehler-Warning — Filterwert matcht keine Gruppe (Verdacht Tippfehler), ohne Lauf zu blockieren
-            # Normalisierte Gruppen-FILTER-Werte (trim+lower, analog is_merge_filter_match)
-            _group_normalized_filters: set[str] = set()
-            for _gh, _meta in group_metadata.items():
-                _fv = _meta.get("filter")
-                if _fv is None:
-                    _cand = ""
-                else:
-                    _cand = str(_fv).strip().lower()
-                _group_normalized_filters.add(_cand)
-            for _flt in set(effective_filters or []):
-                if _flt not in _group_normalized_filters:
+            # V1.7-9 Zentralisierung: Tippfehler-Check via check_filter_typos (merge.filter_typo)
+            _group_filter_list = [m.get("filter") for m in group_metadata.values()]
+            _typos = check_filter_typos(effective_filters or [], _group_filter_list)
+            if _typos:
+                _group_norm_for_log = sorted(
+                    {("" if v is None else str(v).strip().lower()) for v in _group_filter_list}
+                )
+                for _flt in _typos:
                     self.logger.warning(
-                        "multi_group.merge_filter_no_match",
+                        "merge.filter_typo",
                         filter=_flt,
                         effective=effective_filters,
-                        groups=sorted(_group_normalized_filters),
-                        hint="Verdacht Tippfehler: Filter-Wert passt zu keiner Gruppe — Pruefe Schreibweise (case-insensitive, getrimmt)",
+                        groups=_group_norm_for_log,
+                        hint="Suspected typo: filter value matches no group — check spelling (case-insensitive, trimmed)",
                     )
             _filtered_group_stacks: dict[str, Path] = {gh: p for gh, p in group_stacks.items() if gh in candidate_hashes}
             _filtered_groups: dict[str, GroupInfo] = {gh: g for gh, g in groups.items() if gh in candidate_hashes}
@@ -2102,7 +2325,7 @@ class MultiGroupProcessor:
         # Compute pixel scale once (shared across groups).
         # F-META-1.2 (stella Punkt 5): Stack-Skala aus dem verankerten
         # stack_scale_factor der Registrations-Config (KEIN fester
-        # 4.0-Faktor; Teleskop (z.B. Dwarf3): nativ 2.9 µm, 2x Superpixel-Debayer).
+        # 4.0-Faktor; DWARF Mini: nativ 2.9 µm, 2x Superpixel-Debayer).
         reg_cfg = proc_params.get("registration", {}) or {}
         stack_scale_factor = float(reg_cfg.get("stack_scale_factor", 2.0))
         focal = context.equipment.focal_length_mm
@@ -2180,19 +2403,21 @@ class MultiGroupProcessor:
                 pcc_stacks[group_hash] = pcc_path
 
                 # CR-001 P2 (AC-P2-1..5): Preview je Gruppe nach PCC (farbkalibriert),
-                # Dateiname preview_{group_hash}.jpg in 04_stacked/ (AC-P2-2/3).
+                # Dateiname preview_{group_hash}.(tiff|jpg) in 04_stacked/ (AC-P2-2/3).
+                # V1.12-PREVIEW-FORMAT: format-aware (tiff/jpg) via _preview_fmt/_preview_ext.
                 # Hook ist NICHT an pcc_status gebunden → auch bei Gray-World-Fallback
                 # (AC-P2-4, PCC_FALLBACK_GRAY_WORLD.txt bleibt Indikator). Fehler → nur
                 # Gruppe betroffen, nie Run-Abbruch (AC-P2-5, try/except + Continue).
                 try:
-                    preview_path = create_preview_jpg(
+                    preview_path = create_preview(
                         pcc_path,
-                        group_dir / "04_stacked" / f"preview_{group_hash}.jpg",
+                        group_dir / "04_stacked" / f"preview_{group_hash}{_preview_ext}",
+                        format=_preview_fmt,
                         preview_config=preview_cfg,
                     )
                     if preview_path is None:
                         self.logger.warning("multi_group.preview_failed", hash=group_hash,
-                                            reason="create_preview_jpg_returned_none")
+                                            reason="create_preview_returned_none")
                 except Exception as e:
                     self.logger.warning("multi_group.preview_failed", hash=group_hash, error=str(e))
 
@@ -2348,9 +2573,120 @@ class MultiGroupProcessor:
                 skipped_groups=skipped_groups,  # CR-001 W3 (AC-W3-1) + FSM-B filter_excluded
                 reference_selection=reference_selection,  # CR-001 W14 (AC-W14-2)
                 preview_config=preview_cfg,
+                context=context,
             )
             merged_path = merge_result.merged_path
             merge_report = merge_result.merge_report
+            # P-04-Mini (V1.12-FU-3): Fallback-Sicherung mit VOLLER Gruppen-Metadaten
+            # MergeAgent sieht nur Kandidaten (_merge_meta) — fuer M27 2->1 fehlten die
+            # excluded Metadaten zur integration_lost_pct-Berechnung. Hier mit voller
+            # group_metadata (alle Gruppen) nachberechnen und ins Report syncen.
+            # Bedingung: Original-Gruppen >=2, aber nur 1 Stack im Merge (PCC-Stacks)
+            # und noch kein fallback im Report (MergeAgent hatte bei input=1 bereits
+            # eine Vorstufe geloggt, aber ggf. mit unvollstaendiger Metadaten-Basis).
+            try:
+                _mg_has_fallback = bool(merge_report.get("merge.fallback") or merge_report.get("fallback"))
+                # Fallback-Indikator: genau 1 verbliebener Stack bei >=2 Ursprungsgruppen
+                # (cross_group_gate oder filter_typo). Auch wenn candidate_hashes==1
+                # (filter leaving <2) ist das ein Fallback 2->1.
+                _orig_cnt = len(groups)
+                _remaining_cnt = len(pcc_stacks)
+                if _orig_cnt >= 2 and _remaining_cnt == 1 and not _mg_has_fallback:
+                    _excluded = [h for h in groups if h not in pcc_stacks]
+                    # Fallback: falls groups via discover, aber group_metadata unvollständig
+                    if not _excluded:
+                        _excluded = [h for h in group_metadata if h not in pcc_stacks]
+                    # Deduplicate skipped + orig
+                    for s in (skipped_groups or []):
+                        g = s.get("group")
+                        if g and g not in _excluded and g not in pcc_stacks:
+                            _excluded.append(g)
+                    # Reason heuristisch
+                    _reasons = {str(s.get("reason", "")) for s in (skipped_groups or [])}
+                    if any("filter" in r.lower() for r in _reasons):
+                        _reason = "filter_typo"
+                    elif any("corr" in r.lower() or "cross" in r.lower() or "below" in r.lower() for r in _reasons):
+                        _reason = "cross_group_gate"
+                    elif _excluded:
+                        # Default: gate, da filter bereits oben erkannt wuerde
+                        _reason = "cross_group_gate"
+                    else:
+                        _reason = "unknown"
+                    _remaining = sorted(pcc_stacks.keys())
+                    # Integration lost pct mit voller Metadaten
+                    try:
+                        total_all = sum(float(group_metadata.get(h, {}).get("total_exposure", 0) or 0) for h in set(_remaining + _excluded))
+                        if not total_all:
+                            total_all = sum(float(group_metadata.get(h, {}).get("frame_count", 0) or 0) for h in set(_remaining + _excluded))
+                        total_rem = sum(float(group_metadata.get(h, {}).get("total_exposure", 0) or 0) for h in _remaining)
+                        if not total_rem:
+                            total_rem = sum(float(group_metadata.get(h, {}).get("frame_count", 0) or 0) for h in _remaining)
+                        if total_all and total_all > 0:
+                            _lost = round((1 - total_rem / total_all) * 100, 1)
+                        else:
+                            _lost = None
+                    except Exception:
+                        _lost = None
+                    _fb = {
+                        "from": _orig_cnt,
+                        "to": _remaining_cnt,
+                        "excluded": _excluded[0] if len(_excluded) == 1 else _excluded,
+                        "excluded_groups": list(_excluded),
+                        "remaining_groups": list(_remaining),
+                        "reason": _reason,
+                        "integration_lost_pct": _lost,
+                    }
+                    # Warnung (falls MergeAgent sie nicht bereits mit korrekter LOST-PCT geloggt hat)
+                    # Immer loggen — Duplikat wird via structlog dedup nicht stoeren; Hint Lesson-4-konform
+                    self.logger.warning(
+                        "merge.fell_back_to_single_group",
+                        excluded_group=_excluded[0] if len(_excluded) == 1 else ",".join(_excluded) if _excluded else "unknown",
+                        excluded_groups=list(_excluded),
+                        remaining_groups=list(_remaining),
+                        integration_lost_pct=_lost,
+                        reason=_reason,
+                        from_count=_orig_cnt,
+                        to_count=_remaining_cnt,
+                        hint=f"merge fell back to single group, {_excluded[0] if _excluded else 'unknown'} excluded — check cross_group gate / filter_typo",
+                    )
+                    merge_report["merge.fallback"] = dict(_fb)
+                    merge_report["fallback"] = dict(_fb)
+                    # Persistiere auch fuer direkten write (MergeAgent hatte bereits geschrieben — hier updaten)
+                    try:
+                        from pathlib import Path as _P
+                        _mr_path = (self.working_dir / "merged" / "merge_report.json")
+                        if _mr_path.exists():
+                            import json as _js
+                            _existing = _js.loads(_mr_path.read_text(encoding="utf-8"))
+                            _existing["merge.fallback"] = dict(_fb)
+                            _existing["fallback"] = dict(_fb)
+                            _mr_path.write_text(_js.dumps(_existing, indent=2, ensure_ascii=False), encoding="utf-8")
+                    except Exception:
+                        pass
+                elif _orig_cnt >= 2 and _remaining_cnt == 1 and _mg_has_fallback:
+                    # Bestehenden Fallback mit voller Metadaten-Lost-PCT anreichern falls missing
+                    _fb_existing = merge_report.get("merge.fallback") or merge_report.get("fallback") or {}
+                    if _fb_existing.get("integration_lost_pct") is None:
+                        try:
+                            _ex = _fb_existing.get("excluded_groups") or ([_fb_existing.get("excluded")] if _fb_existing.get("excluded") else [])
+                            if isinstance(_ex, str):
+                                _ex = [_ex]
+                            _rem = _fb_existing.get("remaining_groups") or sorted(pcc_stacks.keys())
+                            total_all2 = sum(float(group_metadata.get(h, {}).get("total_exposure", 0) or 0) for h in set(list(_rem) + list(_ex)))
+                            if not total_all2:
+                                total_all2 = sum(float(group_metadata.get(h, {}).get("frame_count", 0) or 0) for h in set(list(_rem) + list(_ex)))
+                            total_rem2 = sum(float(group_metadata.get(h, {}).get("total_exposure", 0) or 0) for h in _rem)
+                            if not total_rem2:
+                                total_rem2 = sum(float(group_metadata.get(h, {}).get("frame_count", 0) or 0) for h in _rem)
+                            if total_all2 and total_all2 > 0:
+                                _lost2 = round((1 - total_rem2 / total_all2) * 100, 1)
+                                _fb_existing["integration_lost_pct"] = _lost2
+                                merge_report["merge.fallback"] = dict(_fb_existing)
+                                merge_report["fallback"] = dict(_fb_existing)
+                        except Exception:
+                            pass
+            except Exception as _fb_e:
+                self.logger.warning("merge.fallback_persist_failed", error=str(_fb_e))
 
             # V1.6 (stella/Boris 2026-08-20): PCC auf MERGED Stack (pcc_per_group=False)
             # DEF-014: pcc_step_active-Gate — kein PCC wenn Preset keinen Step hat.
@@ -2373,8 +2709,8 @@ class MultiGroupProcessor:
                     # ray Review Fix 1 (2026-08-21): Return AUSWERTEN — der
                     # Status muss bis ProcessingResult.pcc_status durch-
                     # kommen (agent-log.yaml + run-info.json), sonst bleibt
-                    # es fälschlich "pending" (z.B. bei Quality-Gate-
-                    # Rejection).
+                    # es fälschlich None (z.B. bei Quality-Gate-
+                    # Rejection). V1.12-FU-2: pending→None.
                     merged_pcc_result_path, merged_pcc_status = self._apply_pcc_per_group(
                         pcc_merged_path, context, multi_group_config,
                         merged_dir, pixel_scale,
@@ -2461,38 +2797,167 @@ class MultiGroupProcessor:
         # 8c. F-META-1.2: Merge-Export-Header best-effort anreichern
         # (Light-Header-Keys + approximatives WCS + effektive Pixelgroesse
         # XPIXSZ/YPIXSZ, analog Single-Group).
+        # S1 FIX: drizzle single-group merged 3840x2160 muss 1.45/1/2.0 haben, nicht 5.8 via superpixel
+        # (scale_window 2.0 != drizzle_scale 2.0). Daher drizzle-Erkennung + build_effective_header(method=drizzle).
         if merged_path and merged_path.exists():
-            # F-META-1.2 (stella Punkt 5): effektive Pixelgroesse aus der
-            # verankerten Registrations-Config (Precedence CLI > Config >
-            # Preset > Default, resolve_registration).
-            # V1.8-1 (DEF-005): Single-group fallback materialization may have
-            # a different effective stack_scale_factor than the global default.
-            export_ssf = float(stack_scale_factor)
-            if len(groups) == 1:
-                single_group_meta = next(iter(group_metadata.values()))
-                single_eff_ssf = single_group_meta.get("effective_stack_scale_factor")
-                if single_eff_ssf is not None:
-                    export_ssf = float(single_eff_ssf)
-            export_wcs_info = wcs_info
-            if export_ssf != float(stack_scale_factor):
-                if focal and pix_um and focal > 0 and pix_um > 0:
-                    export_pixel_scale = compute_pixel_scale(focal, pix_um, binning=export_ssf)
-                else:
-                    export_pixel_scale = 0.0
-                if (
-                    context.target.ra is not None
-                    and context.target.dec is not None
-                    and export_pixel_scale > 0
-                ):
-                    export_wcs_info = {
-                        "ra": context.target.ra,
-                        "dec": context.target.dec,
-                        "pixel_scale_arcsec": export_pixel_scale,
-                    }
-            annotate_export_header(
-                merged_path, context, wcs=export_wcs_info,
-                stack_scale_factor=export_ssf,
-            )
+            # Detect drizzle merged: single-group drizzle oder multi-group drizzle (naxis 3840)
+            _is_drizzle_merged = False
+            _drizzle_scale_val = 2.0
+            _drizzle_pixfrac_val = None
+            _drizzle_kernel_val = None
+            _drizzle_nframes_val = None
+            # Check via cfa_drizzle_results or group_metadata drizzle entries
+            try:
+                if cfa_drizzle_results:
+                    # At least one group drizzled -> merged is drizzle (even single-group)
+                    _is_drizzle_merged = True
+                    # Use first drizzled group's scale/pixfrac/kernel/nframes
+                    _first = next(iter(cfa_drizzle_results.values()))
+                    _drizzle_scale_val = float(_first.get("scale", 2.0))
+                    _drizzle_pixfrac_val = _first.get("pixfrac")
+                    _drizzle_kernel_val = _first.get("kernel")
+                    _drizzle_nframes_val = _first.get("n_frames_out")
+                # Single-group group_metadata drizzle check (covers the case where results dict cleared but meta persists)
+                if not _is_drizzle_merged and len(groups) == 1:
+                    _sgm = next(iter(group_metadata.values())) if group_metadata else {}
+                    _dm = _sgm.get("drizzle") if isinstance(_sgm, dict) else None
+                    if isinstance(_dm, dict) and _dm.get("scale"):
+                        _is_drizzle_merged = True
+                        _drizzle_scale_val = float(_dm.get("scale", 2.0))
+                        if _drizzle_pixfrac_val is None:
+                            _drizzle_pixfrac_val = _dm.get("pixfrac")
+                        if _drizzle_kernel_val is None:
+                            _drizzle_kernel_val = _dm.get("kernel")
+                        if _drizzle_nframes_val is None:
+                            _drizzle_nframes_val = _dm.get("n_frames_out")
+                # Fallback via file NAXIS/DRZSCALE (covers standalone copy without metadata)
+                if not _is_drizzle_merged:
+                    try:
+                        with fits.open(merged_path) as _mhdu:
+                            _mh = _mhdu[0].header
+                            if _mh.get("DRZSCALE") is not None:
+                                _is_drizzle_merged = True
+                                try:
+                                    _drizzle_scale_val = float(_mh.get("DRZSCALE", 2.0))
+                                except Exception:
+                                    _drizzle_scale_val = 2.0
+                            elif _mh.get("NAXIS1") == 3840 and _mh.get("NAXIS2") == 2160:
+                                _is_drizzle_merged = True
+                    except Exception:
+                        pass
+            except Exception:
+                _is_drizzle_merged = False
+            if _is_drizzle_merged:
+                # Drizzle path: build_effective_header with method drizzle, drizzle_scale, naxis 3840x2160
+                try:
+                    from ..core.header_utils import annotate_fits as _af_m, build_effective_header as _beh_m
+                    # NAXIS for CRPIX correctness
+                    _naxis_m = None
+                    try:
+                        with fits.open(merged_path) as _hdul_m:
+                            _n1 = _hdul_m[0].header.get("NAXIS1")
+                            _n2 = _hdul_m[0].header.get("NAXIS2")
+                            if _n1 and _n2:
+                                _naxis_m = (int(_n1), int(_n2))
+                            elif _hdul_m[0].data is not None:
+                                _d = _hdul_m[0].data
+                                if _d.ndim == 3:
+                                    _naxis_m = (int(_d.shape[2]), int(_d.shape[1])) if _d.shape[0] == 3 else (int(_d.shape[-1]), int(_d.shape[-2]))
+                                else:
+                                    _naxis_m = (int(_d.shape[1]), int(_d.shape[0]))
+                    except Exception:
+                        _naxis_m = (3840, 2160)
+                    # WCS for drizzle merged — pixel_scale from drizzle 1.45
+                    _export_wcs_drz = wcs_info
+                    try:
+                        if focal and pix_um and focal > 0 and pix_um > 0:
+                            _drizzle_ps = compute_pixel_scale(focal, pix_um, binning=1.0 / float(_drizzle_scale_val))
+                            if context.target.ra is not None and context.target.dec is not None and _drizzle_ps > 0:
+                                _export_wcs_drz = {"ra": context.target.ra, "dec": context.target.dec, "pixel_scale_arcsec": _drizzle_ps}
+                    except Exception:
+                        _export_wcs_drz = wcs_info
+                    _total_exp = sum(float(v.get("total_exposure", 0) or 0) for v in group_metadata.values()) or None
+                    # Use group-filtered context if single group (S4)
+                    _eff_ctx_m = context
+                    if len(groups) == 1:
+                        _sg_hash = next(iter(groups.keys())) if groups else None
+                        if _sg_hash:
+                            try:
+                                from ..models.core import compute_group_hash as _cgh_m
+                                from types import SimpleNamespace as _SN_m
+                                from ..models.core import FrameSet as _FS_m, FrameType as _FT_m
+                                _lights_m = context.get_lights()  # type: ignore
+                                if _lights_m and hasattr(_lights_m, "group_by_params"):
+                                    _gmap_m = _lights_m.group_by_params()
+                                    for _gk_m, _fs_m in _gmap_m.items():
+                                        try:
+                                            _gh_m = _cgh_m(float(_gk_m[0]), int(_gk_m[1]), str(_gk_m[2]))
+                                        except Exception:
+                                            continue
+                                        if _gh_m == _sg_hash and _fs_m.frames:
+                                            _filt_fs_m = _FS_m(frame_type=_FT_m.LIGHT, frames=list(_fs_m.frames))
+                                            _eff_ctx_m = _SN_m(get_lights=lambda fs=_filt_fs_m: fs, target=getattr(context, "target", None), frames={_FT_m.LIGHT: _filt_fs_m})
+                                            break
+                            except Exception:
+                                _eff_ctx_m = context
+                    _hdr_m = _beh_m(_eff_ctx_m, method="drizzle", scale_window=1.0, drizzle_scale=float(_drizzle_scale_val), wcs=_export_wcs_drz, total_exposure=_total_exp, naxis=_naxis_m, drizzle_pixfrac=_drizzle_pixfrac_val, drizzle_kernel=_drizzle_kernel_val, drizzle_nframes=_drizzle_nframes_val)
+                    # Ensure MG* / MERGED etc if building anew (for single-group copy path)
+                    try:
+                        if "MGCNTGRP" not in _hdr_m:
+                            _hdr_m["MGCNTGRP"] = len(groups)
+                        if "MGREFGRP" not in _hdr_m and groups:
+                            _hdr_m["MGREFGRP"] = next(iter(groups.keys()))
+                        _hdr_m["MERGED"] = True
+                    except Exception:
+                        pass
+                    _af_m(merged_path, _hdr_m)
+                except Exception as _e_m:
+                    logger.warning("header_annotate_failed", path=str(merged_path), error=str(_e_m))
+                    # Fallback to regular annotate
+                    # F-META-1.2 fallback: effective Pixelgroesse aus der verankerten Registrations-Config
+                    export_ssf = float(stack_scale_factor)
+                    if len(groups) == 1:
+                        single_group_meta = next(iter(group_metadata.values()))
+                        single_eff_ssf = single_group_meta.get("effective_stack_scale_factor")
+                        if single_eff_ssf is not None:
+                            export_ssf = float(single_eff_ssf)
+                    export_wcs_info = wcs_info
+                    if export_ssf != float(stack_scale_factor):
+                        if focal and pix_um and focal > 0 and pix_um > 0:
+                            export_pixel_scale = compute_pixel_scale(focal, pix_um, binning=export_ssf)
+                        else:
+                            export_pixel_scale = 0.0
+                        if (context.target.ra is not None and context.target.dec is not None and export_pixel_scale > 0):
+                            export_wcs_info = {"ra": context.target.ra, "dec": context.target.dec, "pixel_scale_arcsec": export_pixel_scale}
+                    annotate_export_header(merged_path, context, wcs=export_wcs_info, stack_scale_factor=export_ssf)
+            else:
+                # Non-drizzle path (superpixel/malvar) — unchanged
+                export_ssf = float(stack_scale_factor)
+                if len(groups) == 1:
+                    single_group_meta = next(iter(group_metadata.values()))
+                    single_eff_ssf = single_group_meta.get("effective_stack_scale_factor")
+                    if single_eff_ssf is not None:
+                        export_ssf = float(single_eff_ssf)
+                export_wcs_info = wcs_info
+                if export_ssf != float(stack_scale_factor):
+                    if focal and pix_um and focal > 0 and pix_um > 0:
+                        export_pixel_scale = compute_pixel_scale(focal, pix_um, binning=export_ssf)
+                    else:
+                        export_pixel_scale = 0.0
+                    if (
+                        context.target.ra is not None
+                        and context.target.dec is not None
+                        and export_pixel_scale > 0
+                    ):
+                        export_wcs_info = {
+                            "ra": context.target.ra,
+                            "dec": context.target.dec,
+                            "pixel_scale_arcsec": export_pixel_scale,
+                        }
+                annotate_export_header(
+                    merged_path, context, wcs=export_wcs_info,
+                    stack_scale_factor=export_ssf,
+                )
 
         # 9. Export merged result (final FITS lives ONLY in merged/ — v1.11:
         # no top-level copy; single-group top-level *_final.fits unchanged)
@@ -2515,10 +2980,10 @@ class MultiGroupProcessor:
                 if stretched:
                     exports.append(stretched)
 
-            # Create auto-stretched JPG preview
-            jpg_out = merged_dir / f"{safe_target}_merged_preview.jpg"
-            preview = create_preview_jpg(
-                merged_path, jpg_out,
+            # Create auto-stretched preview (format-aware, V1.12)
+            preview_out = merged_dir / f"{safe_target}_merged_preview{_preview_ext}"
+            preview = create_preview(
+                merged_path, preview_out, format=_preview_fmt,
                 preview_config=preview_cfg,
             )
             if preview:
@@ -2588,8 +3053,19 @@ class MultiGroupProcessor:
                 mg_metadata["filter_warnings"] = {
                     "unmatched_filters": _unmatched,
                     "available_filters": sorted(_group_norm),
-                    "hint": "Verdacht Tippfehler: Filter-Wert passt zu keiner Gruppe",
+                    "hint": "Suspected typo: filter value matches no group",
                 }
+        # P-04-Mini: Fallback persistieren (aus merge_report) fuer agent-log.yaml + QC
+        # Key: merge.fallback / fallback + top-level merge_fallback (archive-Schnittstelle)
+        _fb_for_meta = None
+        try:
+            _fb_for_meta = (merge_report or {}).get("merge.fallback") or (merge_report or {}).get("fallback")
+        except Exception:
+            _fb_for_meta = None
+        if _fb_for_meta:
+            mg_metadata["merge.fallback"] = dict(_fb_for_meta)
+            mg_metadata["merge_fallback"] = dict(_fb_for_meta)
+            mg_metadata["fallback"] = dict(_fb_for_meta)
 
         return self.processing_result_class(
             stacked=merged_path,

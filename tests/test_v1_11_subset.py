@@ -789,13 +789,11 @@ class TestAcSubset9ResumeLimitGuard:
         )
 
     def test_process_resume_without_limit_ok(self, tmp_path):
-        """--resume ohne --limit → kein Guard-Fehler (normale Validierung)."""
+        """--resume ohne --limit → verworfen Guard (T4: --resume immer Error2)."""
         target = _make_target_with_lights(tmp_path, n_lights=5)
         write_default_suggested(target)
 
         runner = CliRunner()
-        # Nur pruefen dass kein LIMIT-Guard-Fehler kommt
-        # (es kann andere Fehler geben wegen fehlender Pipeline-Resourcen)
         result = runner.invoke(
             cli,
             [
@@ -806,13 +804,14 @@ class TestAcSubset9ResumeLimitGuard:
                 "--dry-run",
             ],
         )
-        # Guard-Fehler hat exit_code 2 UND output enthaelt "resume" + "limit"
-        if result.exit_code == 2:
-            output_lower = result.output.lower()
-            has_guard_error = "resume" in output_lower and "limit" in output_lower
-            assert not has_guard_error, (
-                "Unerwarteter Resume+Limit Guard ohne --limit Flag"
-            )
+        assert result.exit_code == 2, (
+            f"Erwartet Exit 2 (T4 --resume verworfen), got {result.exit_code}\n{result.output}"
+        )
+        output_lower = result.output.lower()
+        assert "deprecated" in output_lower and "archive" in output_lower, (
+            f"Erwartet 'deprecated' + 'archive' im Output: {result.output}"
+        )
+        assert "resume" in output_lower, f"Erwartet 'resume' im Output: {result.output}"
 
     def test_process_limit_invalid_zero(self, tmp_path):
         """--limit 0 → Error Exit 2 mit Hint N >= 1."""

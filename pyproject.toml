@@ -1,10 +1,23 @@
+# V1.12-FU-1 (2026-09-08): Version precedence SSOT and entry-point parity (pyproject.toml).
+# SSOT is pyproject.toml [project] version here (hatchling, not dynamic). Runtime exposes
+# the same string via two equal-precedence paths:
+#   - import astro_process; astro_process.__version__  (src/astro_process/__init__.py)
+#   - astra --version / python -m astro_process --version (src/astro_process/cli.py)
+# Both read installed distribution metadata via importlib.metadata (astra-pipeline
+# -> astra fallback -> 0.0.0+dev when running from source without install).
+# CHANGELOG.md is derived from this version (curated per release); git tag
+# v<version> is created FROM this pyproject version at publish time (never reverse).
+# Canonical entry-point is the `astra` console script (alias astro-process);
+# `python -m astro_process` (src/astro_process/__main__.py) is byte-identical
+# parity. `python -m astra` is NOT supported (packages = ["src/astro_process"]).
+# Detail: src/astro_process/__init__.py docstring + release-process.md Phase 5.
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
 name = "astra-pipeline"
-version = "1.11.1"
+version = "1.12.0"
 description = "Agentic Astrophotography Processing Pipeline"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -42,6 +55,14 @@ dependencies = [
     # DEF-008 (Boris-Entscheid 2026-09-02): astroquery ist Base-Dependency,
     # damit PCC (GAIA/VizieR/APASS) out-of-the-box verfuegbar ist.
     "astroquery>=0.4",
+    # V1.12-PREVIEW-FORMAT (AC-PREVIEW-FMT-2): tifffile fuer 16-bit TIFF Previews
+    # Pillow kann uint16 RGB nicht direkt speichern (fromarray (H,W,3) uint16 -> TypeError)
+    "tifffile>=2023.0",
+    # sep (Source Extractor Python) is a hard base dependency: used in GAIA-PCC star
+    # detection (_find_sources) and is not optional -- without it PCC always falls back
+    # to gray_world and ghosting detection is skipped. Moved from astroalign extra to
+    # base so that 'pip install astra-pipeline' works out of the box. (backy, 2026-09-19)
+    "sep>=1.4",
 ]
 
 [project.optional-dependencies]
@@ -64,15 +85,17 @@ dev = [
 graxpert = ["graxpert>=3.2"]
 astro = ["astrometry-net>=0.97"]
 # W9-A (AC-W9-A1, ADR-021): optional astroalign extra.
-# sep is a hard runtime dependency (unconditional `import sep` in _find_sources).
-# scikit-image is a lazy/optional dependency loaded by astroalign when used.
-# scikit-learn ist ebenfalls lazy: wird von scikit-image bei astroalign-Nutzung
-# benoetigt, aber nicht beim reinen `import astroalign` (DEF-007).
-astroalign = ["astroalign>=2.6,<3", "scikit-image>=0.24", "scikit-learn>=1.1", "sep>=1.4"]
+# sep is now a base dependency (moved from here, backy 2026-09-19) -- it is a hard
+# runtime requirement for GAIA-PCC star detection. scikit-image is a lazy/optional
+# dependency loaded by astroalign when used. scikit-learn ist ebenfalls lazy.
+astroalign = ["astroalign>=2.6,<3", "scikit-image>=0.24", "scikit-learn>=1.1"]
 
 [project.scripts]
 astra = "astro_process.cli:cli"
 astro-process = "astro_process.cli:cli"
+# FU-1 parity: `python -m astro_process` (src/astro_process/__main__.py) forwards
+# to the same cli:cli â€” equal precedence to the `astra` console script.
+# `python -m astra` is not supported (no top-level package `astra`).
 
 # F-SE-1.2 (v12-structure-enhancement.md, SE-B): erstes Produktiv-Plugin
 # in v1.2 (OQ-PL-3-Amendment 2026-08-05). Entry-Point-Gruppe "astra.plugins"
@@ -82,6 +105,13 @@ structure-enhancement = "astro_process.plugins.structure_enhancement:StructureEn
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/astro_process"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"data/target-cache.json" = "astro_process/data/target-cache.json"
+"data/examples" = "astro_process/data/examples"
+"README.md" = "astro_process/README.md"
+"docs" = "astro_process/docs"
+"handbook" = "astro_process/handbook"
 
 [tool.ruff]
 target-version = "py311"

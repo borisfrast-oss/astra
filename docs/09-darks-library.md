@@ -59,7 +59,13 @@ Per-group master darks are written to `generated/<ts>/00_input/master/`.
 
 | Command | Description |
 | --- | --- |
-| `astra darks check` | Check dark-frame coverage for a target. |
+| `astra darks check` | Check dark-frame coverage for a target.
+
+    Checks both the central darks library (darks_repository) and any local
+    darks/ folder inside the target directory (dark_source=local, as used by
+    'astra process' when no library darks match). Local darks are reported
+    separately so coverage is not misleadingly shown as MISSING.
+     |
 | `astra darks import` | Import dark frames from a path into the library. |
 | `astra darks list` | List dark frames in the library. |
 | `astra darks sync` | Sync DwarfLab export into the Darks Library (TELE/cam_0 only, never WIDE/cam_1). |
@@ -67,6 +73,12 @@ Per-group master darks are written to `generated/<ts>/00_input/master/`.
 ### `astra darks check`
 
 Check dark-frame coverage for a target.
+
+    Checks both the central darks library (darks_repository) and any local
+    darks/ folder inside the target directory (dark_source=local, as used by
+    'astra process' when no library darks match). Local darks are reported
+    separately so coverage is not misleadingly shown as MISSING.
+    
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |

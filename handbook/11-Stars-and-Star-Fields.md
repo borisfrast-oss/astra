@@ -1,6 +1,6 @@
 # Workflow 11 – Individual Stars and Star Fields
 
-# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini` (alias `dwarf3` deprecated since V19)
+# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini`
 
 ---
 
@@ -8,7 +8,7 @@
 
 This workflow describes processing individual bright stars and dense star fields with the Dwarf mini.
 
-> **Note (V19):** Since V19 the profile is named `dwarf_mini`; `dwarf3` remains as a deprecated alias for compatibility. Hardware identical.
+> **Note:** The equipment profile is named `dwarf_mini`; `dwarf3` is a deprecated alias (kept for backward compatibility).
 
 Examples:
 

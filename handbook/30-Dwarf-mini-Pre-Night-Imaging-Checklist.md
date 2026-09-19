@@ -1,4 +1,4 @@
-# 30 – Dwarf mini Pre-Night Imaging Checklist (formerly dwarf3)
+# 30 – Dwarf mini Pre-Night Imaging Checklist
 
 # Dwarf mini + Siril 1.4.4 + GraXpert + GIMP 3.2.4 Best Practices Handbook
 

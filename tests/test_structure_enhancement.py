@@ -136,9 +136,13 @@ def _run_agent(
     step_params: dict | None = None,
 ):
     """Minimaler run()-Aufruf; legt optional stacked.fits an."""
+    # v1.12: run() removed — migrated to _run_plugin_steps + export (Always Multi-Group, single-frame plugin path)
+    from astro_process.core.export import export as _export
+
     agent = ProcessingAgent(working_dir=tmp_path / "out", config=None)
+    stacked_path = tmp_path / "out" / "04_stacked" / "stacked.fits"
     if stacked is not None:
-        _save_fits(stacked, tmp_path / "out" / "04_stacked" / "stacked.fits")
+        _save_fits(stacked, stacked_path)
     context = SimpleNamespace(
         target=SimpleNamespace(name="TestTarget", ra=0.0, dec=0.0),
         equipment=SimpleNamespace(focal_length_mm=0.0, pixel_size_um=0.0),
@@ -155,12 +159,26 @@ def _run_agent(
         ],
         processing_params=ProcessingParams(),
     )
-    result = agent.run(
-        context,
-        SimpleNamespace(calibrated_lights=[]),
-        SimpleNamespace(debayered_frames=[]),
-        pipeline,
-    )
+    plugin_results = agent._run_plugin_steps(pipeline, context)
+    # mimic run() adoption: if plugin produced enhanced.fits, use it as stacked
+    current_stacked = stacked_path if stacked_path.exists() else None
+    for pr in plugin_results:
+        art = getattr(pr, "artifact", None)
+        if art is not None and Path(art).suffix.lower() == ".fits" and Path(art).parent == agent.stacked_dir:
+            current_stacked = Path(art)
+    exports: list[Path] = []
+    if "export" in steps and current_stacked is not None and current_stacked.exists():
+        # minimal ObservationContext for export (target name + equipment)
+        try:
+            fake_context = SimpleNamespace(
+                target=SimpleNamespace(name="TestTarget", ra=0.0, dec=0.0),
+                equipment=SimpleNamespace(focal_length_mm=0.0, pixel_size_um=0.0),
+            )
+            exports = _export(current_stacked, "TestTarget", context=fake_context, working_dir=agent.working_dir)
+        except Exception:
+            exports = []
+    from astro_process.agents.processing_agent import ProcessingResult as _PR
+    result = _PR(stacked=current_stacked, exports=exports, registered_frames=[], multi_group_metadata=None)
     return agent, result
 
 

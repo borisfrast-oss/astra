@@ -51,6 +51,13 @@ class PCCResult:
     Replaces the bare ``np.ndarray | None`` return to make the PCC status
     machine-readable for merge_report.json (pcc_status field).
 
+    V1.12-FU-2 (ray FU-2, 2026-09-07): drei-wertig — ``None`` (nicht
+    durchgeführt; z.B. skipped/disabled/kein Katalog) vs. ``"timeout"``
+    (Katalog-Query Timeout, fehlgeschlagen) vs. ``"success"``-Familie
+    (``gaia_success`` / ``vizier_*_success`` / ``fallback_gray_world`` etc.
+    = ok). Stub ``"pending"`` entfällt — nicht-durchgeführt wird als
+    ``None`` geloggt (agent-log.yaml/run-info.json).
+
     Status values:
         gaia_success: GAIA DR3 TAP catalog match succeeded.
         vizier_apass_success: VizieR APASS DR9 catalog match succeeded.
@@ -60,6 +67,7 @@ class PCCResult:
         rejected_implausible_factors: Quality Gate — mindestens ein Kanal-
             Faktor <= 0 oder ausserhalb [min_factor, max_factor]; Stack
             wurde NICHT ueberschrieben (2026-08-21).
+        timeout: Katalog-Query Timeout (GAIA/VizieR) — fehlgeschlagen.
     """
 
     corrected: np.ndarray | None
@@ -92,10 +100,23 @@ except ImportError:
     _Vizier = None
     _GAIA_OPT_AVAILABLE = False
     _VIZIER_OPT_AVAILABLE = False
-    logger.warning(
-        "pcc.gaia_optional_unavailable",
-        reason="astroquery or sep not installed — GAIA-PCC und VizieR-Katalog-Fallback deaktiviert, Gray-World-Fallback aktiv",
-    )
+    # Warning is emitted lazily on first apply_pcc() call (not at import /
+    # --version / --help / doctor).  See _warn_pcc_unavailable_once().
+
+_pcc_unavailable_warned: bool = False
+
+
+def _warn_pcc_unavailable_once() -> None:
+    """Emit pcc.gaia_optional_unavailable exactly once, only when PCC is
+    actually attempted (not at CLI startup / --version / --help / doctor).
+    """
+    global _pcc_unavailable_warned
+    if not _pcc_unavailable_warned:
+        _pcc_unavailable_warned = True
+        logger.warning(
+            "pcc.gaia_optional_unavailable",
+            reason="sep not installed -- GAIA-PCC and VizieR catalog disabled, Gray-World fallback active",
+        )
 
 
 def detect_stars(image: np.ndarray, threshold: float = 5.0, min_area: int = 5) -> list:
@@ -184,7 +205,7 @@ def compute_pixel_scale(
         pixel_size_um: Pixel size in µm (from FITS XPIXSZ/YPIXSZ)
         binning: Effektiver Stack-Faktor (Superpixel-Debayer, ggf. Hardware-
                  Binning) — entspricht ``registration.stack_scale_factor``.
-                 Default 2.0 = Teleskop (z.B. Dwarf3): nativ 1920x1080 (~2MP) mit
+                 Default 2.0 = DWARF Mini: nativ 1920x1080 (~2MP) mit
                  2x2-Superpixel-Debayer -> 2.9 µm x 2 = 5.8 µm.
 
     Returns:
@@ -538,7 +559,7 @@ def _gaia_pcc(
         PCCResult with corrected image and status.
     """
     if not _GAIA_OPT_AVAILABLE:
-        logger.warning("pcc.gaia_unavailable", reason="astroquery or sep not installed")
+        _warn_pcc_unavailable_once()
         return PCCResult(corrected=None, status="skipped")
 
     try:
@@ -580,7 +601,7 @@ def _gaia_pcc(
             job = _run_with_timeout(_Gaia.launch_job, timeout, query)
         except TimeoutError:
             logger.warning("pcc.gaia_timeout", timeout=timeout)
-            return PCCResult(corrected=None, status="skipped")
+            return PCCResult(corrected=None, status="timeout")
         catalog = job.get_results()
 
         if len(catalog) < 3:
@@ -650,7 +671,7 @@ def _vizier_pcc(
         PCCResult with corrected image and catalog-specific status.
     """
     if not _VIZIER_OPT_AVAILABLE:
-        logger.warning("pcc.vizier_unavailable", reason="astroquery not installed")
+        _warn_pcc_unavailable_once()
         return PCCResult(corrected=None, status="skipped")
 
     try:
@@ -890,7 +911,7 @@ def apply_pcc(
         ra: Right Ascension in degrees (optional)
         dec: Declination in degrees (optional)
         pixel_scale_arcsec: Pixel scale in arcsec/pixel (Stack-Skala, z.B.
-                           ~8'' beim Teleskop (z.B. Dwarf3) mit 2x Superpixel-Debayer)
+                           ~8'' beim DWARF Mini mit 2x Superpixel-Debayer)
         gaia_timeout: Basis-Timeout fuer GAIA-Versuche (V1.4-19: Backoff
                       1x/2x/3x; Default GAIA_QUERY_TIMEOUT_SECONDS).
         vizier_apass_timeout: Timeout fuer VizieR APASS DR9 Query.
@@ -1151,13 +1172,31 @@ def photometric_color_calibration(
                      warning="pcc_rejected_implausible_factors")
             return "rejected_implausible_factors"
         if pcc_result.corrected is None:
+            # V1.12-FU-2 drei-wertig: timeout vs. None (nicht durchgeführt) vs. success.
+            # Timeout: Katalog-Query Timeout — fehlgeschlagen.
+            if pcc_result.status == "timeout":
+                log.warning("pcc.status", status="timeout",
+                            reason="catalog_timeout")
+                try:
+                    marker_path = stacked.parent / "PCC_TIMEOUT.txt"
+                    marker_path.write_text(
+                        "PCC (Photometric Color Calibration) timeout.\n"
+                        "Catalog query timed out (GAIA/VizieR).\n"
+                        "Frame left uncorrected.\n"
+                    )
+                except Exception as marker_e:
+                    log.warning("pcc.timeout_marker_failed", error=str(marker_e))
+                log.info("pipeline.status", status="success_with_warnings",
+                         warning="pcc_timeout")
+                return "timeout"
             # V1.4-19 (51 Cyg): "skip" — Katalog-Kette (GAIA-Retry +
             # VizieR) fehlgeschlagen, KEIN gray_world bei Stern-Presets.
             # Frame bleibt unveraendert (kein save_frame); der
             # PCC_SKIPPED.txt-Marker macht den Zustand maschinenlesbar
             # (apply_pcc_per_group liefert damit Status "skipped" statt
             # faelschlich "gaia_success").
-            log.warning("pcc.status", status="skipped",
+            _actual_status = pcc_result.status or "pcc_skipped"
+            log.warning("pcc.status", status=_actual_status,
                         reason="catalog_chain_failed_no_gray_world_skip_preset")
             try:
                 marker_path = stacked.parent / "PCC_SKIPPED.txt"
@@ -1171,7 +1210,7 @@ def photometric_color_calibration(
                 log.warning("pcc.skip_marker_failed", error=str(marker_e))
             log.info("pipeline.status", status="success_with_warnings",
                      warning="pcc_skipped")
-            return pcc_result.status or "pcc_skipped"
+            return _actual_status
         # Backup linear stack BEFORE PCC overwrite (Fix: Problem 2)
         import shutil
         backup = stacked.parent / "stacked_linear.fits"

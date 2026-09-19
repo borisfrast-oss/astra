@@ -1,6 +1,6 @@
 # 04 – Siril 1.4.4 Reference
 
-# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini` (alias `dwarf3` deprecated since V19)
+# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini`
 
 ---
 
@@ -518,7 +518,7 @@ Suitable:
 
 # Recommendation Dwarf mini
 
-> **Note (V19):** Since V19 the profile is named `dwarf_mini`; `dwarf3` remains as a deprecated alias for compatibility. Hardware identical.
+> **Note:** The equipment profile is named `dwarf_mini`; `dwarf3` is a deprecated alias (kept for backward compatibility).
 
 For identical lights:
 
@@ -850,6 +850,8 @@ Determines exact sky position (WCS) of image. Prerequisite for:
 - Photometry / PCC with Gaia catalog
 - Object annotation (overlay catalogs)
 - Mosaic stitching (overlap calculation)
+
+> **Note:** `VizieR` (APASS DR9 / ATLAS Refcat2) is available as faster alternative to `Gaia` for PCC — typically 20–30 s faster (`core/pcc.py` uses VizieR primary, Gaia fallback).
 
 ### Prerequisites
 - `astrometry.net` installed (external tool)

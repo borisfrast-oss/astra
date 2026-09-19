@@ -1,160 +1,58 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to **Astra** are documented here. Format oriented on
 [Keep a Changelog](https://keepachangelog.com/). Release audit details are
 maintained separately and are not shipped in this repository.
 
-## [1.9.0] - 2026-09-01
+## [1.12.0] - 2026-09-16
 
 ### Highlights
 
-- **Environment & Configuration** — Cross-platform `.env` support with `${VAR:-default}` expansion, non-interactive initialization, and `astra doctor` environment checks.
-- **Governance & Community** — MIT license, clear DwarfLab disclaimer, contribution guidelines, code of conduct, security policy, and GitHub sponsorship support.
-- **Release Engineering** — PyPI Trusted Publisher OIDC workflows, curated CHANGELOG via `git-cliff`, and CI matrix on Ubuntu + Windows with Python 3.11.
-- **Smart Registration Defaults** — Added `dwarf_mini` profile and `dwarf3` alias, automatic mount-type detection, and priority chain (CLI > Equipment Profile > Auto-Detect > Config > Default). FFT registration on AZ mounts now warns for exposures above the configurable `max_exptime_fft_warn` threshold (default 45 s).
-- **CFA Quality Gate** — Automatic selection between raw-CFA and debayered defaults for quality checks, configurable via `mode auto|cfa|debayered`.
-- **PCC Toggle** — Added `--pcc/--no-pcc` CLI flags to override Photometric Color Calibration per run.
-
-### Upgrade (short)
-
-```bash
-pip install astra-pipeline==1.9.0
-cp .env.example .env  # edit ASTRA_DATA_ROOT, ASTRA_DARKS_REPOSITORY
-astra init --non-interactive
-astra doctor
-```
-
-### Breaking (short)
-
-- Package install name changed from `astra` to `astra-pipeline`.
-- `environment.yaml` is replaced by `.env` (`config.example.yaml` supports `${VAR:-default}`).
-- `dwarf_mini` profile added; `dwarf3` is now a deprecated alias.
-- `fft` registration on an AZ mount with exposures `>= 45 s` emits `WARN registration.fft_on_az_mount`.
-
-See `docs/12-migration.md` (full upgrade guide v1.8→v1.9) and `docs/11-troubleshooting.md` (known issues and resolved defects).
-
-## [v1.8] — 2026-08-27
-
-**The High-Resolution Update.** This release brings major architectural
-improvements to raw-data processing for the Dwarf Mini, introducing
-state-of-the-art algorithms to beat the Dwarflab cloud locally: **Malvar2004**
-high-quality debayering, **CFA-Drizzle** (Scale 2.0) for true sub-pixel detail,
-and **Super-Pixel** as the new default debayer method.
+- **Agent-Free Delivery** — Pipeline is now fully self-contained; no external Knowledge Base required. Target cache (`astra/data/target-cache.json`, 35 objects) is baked into the Wheel; `astra suggest` / `astra process` run offline-first with local cache first, SIMBAD only on cache miss.
+- **Minimal Baked Cache** — Cache reduced to essentials (`catalog_number`, `type`, `ra`, `dec`, `aliases`); verbose fields (`Handbook`, `Preset`, `Ordner`, `Besonderheit`, `Größe/Helligkeit` → `Size/Brightness`, `Sternbild` → `constellation`) removed. Preset & Handbook derived live via `Typ → Handbook Kap.22 → Preset` (`classify_and_cite`). Historical German field names retained as literals in this entry only (UTF-8).
+- **Cache Language** — Cache entries now English (`type: galaxy`, `star`, `dark_nebula`, `open_cluster`, `globular`, `planetary`, `snr`, `moon`); no more German descriptions (`Stern (K0IIIa Riese)` → `star`).
+- **M31 Mini-Example (A+B)** —
+  - **A:** Synthetic 5-frame M31 (60s Gain 40 Astro, superpixel 32×32, `galaxy_standard` preset) baked into Wheel (<100 KB). Offline `astra process --limit 5` works immediately after `pip install`.
+  - **B:** Real 10-frame M31 (90s40 Astro, from C:\Astra reference) as GitHub Release Asset via `astra download-example M31 --n 10`. Real-Gate `astra process --limit 5` validates full pipeline on real data.
+- **Ghost Bugs Fixed** — B1: `suggest --header` no longer creates ghost folders (path from `original_target`). B2: `suggest` without `--header` now auto-scans `lights\` for `OBJECT` header → cache hit without SIMBAD. B3: `orion` KB cache removed; only `astra/data/target-cache.json` (baked) remains; user `config.yaml` cache path removed.
+- **Offline-First Clarified** — "100% offline" corrected to **offline-first**: pipeline (Calibration → Debayer → Registration → Stacking → PCC → Export) runs fully offline. Only SIMBAD query needs internet (cache miss + online). Baked cache covers common targets.
+- **M31 Mini-Example (A+B)** — Wheel-embedded synthetic smoke + optional real-data download.
+- **Synthetic Darks/Bias** — 1 Master Dark (60s Gain 40) + 1 Bias frame baked into Wheel for M31 Mini-Example; enables full calibration offline.
 
 ### Added
-- **V1.8-0 — Malvar2004 Debayer**: high-quality edge-preserving demosaicing
-  (`debayer.method: malvar2004`), via `colour-demosaicing`. Bilinear deprecated.
-- **V1.8-1 — CFA-Drizzle (Scale 2.0)**: optional sub-pixel drizzle on CFA raws
-  (before debayer), Lanczos3 kernel, adaptive pixfrac, quality-gated, fallback
-  malvar. `--cfa-drizzle`, `cfa_drizzle:` config. PoC ≤0.1px sub-pixel accuracy
-  (M92, 41 frames).
-- **V1.8-2 — Preview/Export-Pipeline**: `export.preview` config — background
-  neutralization → SCNR → asinh → saturation → JPG (OQ-PEX-1 order),
-  each step optional, byte-identical to v1.6 when block absent.
-- **V1.8-3 — Asinh-Stretch FITS-Export**: optional `export.stretched_fits: true`
-  produces an additional display-stretched FITS (`*_stretched.fits`, header
-  `STRETCH=asinh`) for Lightroom/Photoshop. Linear FITS stays default/canonical.
-  Platesolve-isolated (Discovery skips `_stretched`).
-- **V1.8-4 — CLI + Docs Release**: `astra init` wizard (Non-TTY autofallback),
-  `config`/`darks`/`target`/`status`/`doctor` subcommands, `process --preflight`,
-  `inspect --quality`, `doctor --fix`. Docs-Generator `scripts/generate_docs.py`
-  producing 12 `docs/` files from source. `rich`/`prompt-toolkit` deps.
-- **V1.8-5 — Test-Suite Cleanup**: consolidated 7 test files (51 → 44 test
-  files) with no test-loss; 1050 passed + 2 skipped.
-- **V1.8-6 — Pipeline-Docs Migration**: `docs/` (12 files) becomes SSOT;
-  KB docs deprecated to placeholders; `project.md` trimmed; `README.md` fixed;
-  `CHANGELOG.md` added; `Makefile` (`docs`/`check-docs`); pre-release hook wiring.
-  **V1.8-6-FF (finalization)**: finalized AC-DOCS-A2/D1 — all 12 docs generated
-  hash-stably via `generate_docs.py` and written in English per §17.
-- **V1.8-7 — Debayer-Superpixel Validation**: 1:1 validation of bilinear vs
-  superpixel vs malvar methods, pattern-aware, with reviewed extensions
-  (color-fringe <10%, moiré-FFT, flux <2%; M92 visually documented-skip).
-  Test-only.
 
-### Test status
-- 1050 passed, 2 skipped, 0 failed (after V1.8-5/V1.8-7, internal review).
-
-## [v1.7] — Always Multi-Group + Quality-Boost + Equipment Auto-Detection
-
-### Added
-- **V1.7-5 — Always Multi-Group**: unified processing path — `astra process`
-  always runs Multi-Group logic (`group_{hash}/` structure even for 1 group);
-  `--multi-group`/`--auto-group` deprecated to no-op with warning.
-- **V1.7-2 — Frame-Selection / Quality-Scoring**: per-group relative score
-  (Median/MAD, SNR/star_count/FWHM/elongation), keep-percentile (default 92%),
-  opt-in, transparent via agent-log/inspect/doctor.
-- **V1.7-3 — Sigma-Clipped Mean Stack**: 5th stacking method (iterative 3σ,
-  max 5 iterations, early-stop), opt-in via `stacking_method`.
-- **V1.7-4 — Equipment Auto-Detection**: equipment params from Light FITS
-  headers (majority) > config profile > none+warning; `astra inspect`/`doctor`
-  show source per field.
-- **V1.7-1 — Filter-Selection Merge**: `--merge-filter` / `merge.filters` to
-  merge only selected filters (e.g. Astro, exclude Duo-Band); excluded groups
-  kept as separate stacks, documented in merge_report.
-
-### Teststand
-- 930 passed (Branch v1.7).
-
-## [v1.6] — Architektur-Release: FITS-SSOT + Bilinear Debayer + Device-Independence — 2026-08-20
-
-### Added
-- **V1.6-1 — FITS-Header als SSOT**: mandatory validation, generic filename patterns.
-- **V1.6-2 — Bilinear Debayer**: full resolution 1920×1080, `debayer.method` config.
-- **V1.6-3 — Asinh-Stretch Preview-JPG** (DwarfLab-compatible).
-- **V1.6-4 — Registration-Bug fix** ("unexpected_rotation" in cross-group).
-- **V1.6-5 — PCC Fallback-Speed** (VizieR primary, GAIA fallback).
-- **V1.6-6..9 — Device-Independence**: generalized comments, shotsInfo removed
-  from pipeline logic (EQMODE header primary), FITS-header aliases documented,
-  `environment.yaml` (`telescope_export_root`).
+- **M31 Mini-Example (A+B)** —
+  - **A:** `astra/data/examples/M31/` (5 synthetic 60s40 Astro 32×32 superpixel + `suggested.yaml` `galaxy_standard`) baked into Wheel (<100 KB); `astra process --limit 5` instant offline smoke.
+  - **B:** `astra download-example M31 --n 10` — downloads real M31 (10 frames 90s40 Astro from C:\Astra reference) from GitHub Release Asset; idempotent, SHA256 verified, `--force`, `--output`, EN §17 help, Real-Gate `--limit 5`.
+- **`astra download-example`** — New subcommand downloads real M31 example (10 frames 90s40 Astro from C:\Astra reference) from GitHub Release Asset; idempotent, SHA256 verified, `--force`, `--output`, fallback to local `C:\Astra\M31 Andromeda`, EN §17 help, `download.asset_not_found` Exit 2.
+- **`astra init --non-interactive`** — New flag for automated config setup (CI, scripts, demo); writes `config.yaml` + `environment.yaml` with defaults.
+- **Synthetic Darks/Bias** — 1 Master Dark (60s Gain 40) + 1 Bias frame baked into Wheel for M31 Mini-Example; enables full calibration offline.
+- **E2E Onboarding Test Gate** — New automated gate `scripts/e2e_onboarding_gate.ps1` (fresh venv, pip install wheel, `astra init --non-interactive`, `astra demo M31-mini`, `astra process --limit 5`, `astra qc` validation). Integrated in `builds\astra` Phase 2b; 120s timeout; validates fresh venv → wheel install → `astra init --non-interactive` → `astra demo M31-mini` → `astra process --limit 5` → `astra qc` Exit 0.
+- **E2E Onboarding Gate CI** — New CI job `e2e-onboarding` (ubuntu + windows) runs same gate in CI.
+- **`astra init --non-interactive`** — New flag for automated config setup (CI, scripts, demo); writes `config.yaml` + `environment.yaml` with defaults.
+- **Synthetic Darks/Bias** — 1 Master Dark (60s Gain 40) + 1 Bias frame baked into Wheel for M31 Mini-Example; enables full calibration offline.
 
 ### Changed
-- Architecture: FITS-SSOT for lights, filename-fallback only for dark/flat/bias.
 
-### Teststand
-- 814 passed.
+- **Offline-First Messaging** — "100% offline" corrected to **offline-first**: Pipeline (Calibration → Debayer → Registration → Stacking → PCC → Export) runs fully offline. Only SIMBAD query needs internet (cache miss + online). Baked cache covers common targets. Docs updated: README, CLI-Ref, Handbook 22 §17.
+- **Target Cache** — Minimal baked cache (`astra/data/target-cache.json`, 35 objects, English keys: `catalog_number`, `simbad_name`, `type`, `ra`, `dec`, `aliases`). Verbose fields (`Handbook`, `Preset`, `Ordner`, `Besonderheit`, `Größe/Helligkeit` → `Size/Brightness`, `Sternbild` → `constellation`) removed; Preset & Handbook derived live via `Typ → Handbook Kap.22 → Preset` (`classify_and_cite`). Historical German literals UTF-8 verified (paige D3-01 fixed, `check-encoding.ps1` 0).
+- **Target Cache Language** — Cache now English (`type: galaxy`, `star`, `dark_nebula`, `open_cluster`, `globular`, `planetary`, `snr`, `moon`); no more German descriptions (`Stern (K0IIIa Riese)` → `star`).
+- **Ghost Bugs Fixed** — B1: `suggest --header` no longer creates ghost folders (path from `original_target`). B2: `suggest` without `--header` auto-scans `lights\` for `OBJECT` header → cache hit without SIMBAD. B3: `orion` KB cache removed; only `astra/data/target-cache.json` (baked) remains; user `config.yaml` cache path removed.
+- **Target Cache Language** — Cache now English (`type: galaxy`, `star`, `dark_nebula`, `open_cluster`, `globular`, `planetary`, `snr`, `moon`); no more German descriptions (`Stern (K0IIIa Riese)` → `star`).
+- **E2E Onboarding Test Gate** — New automated gate `scripts/e2e_onboarding_gate.ps1` (fresh venv, pip install wheel, `astra init --non-interactive`, `astra demo M31-mini`, `astra process --limit 5`, `astra qc` validation). Integrated in `builds\astra` Phase 2b; 120s timeout; validates fresh venv → wheel install → `astra init --non-interactive` → `astra demo M31-mini` → `astra process --limit 5` → `astra qc` Exit 0.
+- **E2E Onboarding Gate CI** — New CI job `e2e-onboarding` (ubuntu + windows) runs same gate in CI.
+- **`astra init --non-interactive`** — New flag for automated config setup (CI, scripts, demo); writes `config.yaml` + `environment.yaml` with defaults.
+- **Synthetic Darks/Bias** — 1 Master Dark (60s Gain 40) + 1 Bias frame baked into Wheel for M31 Mini-Example; enables full calibration offline.
 
-## [v1.5] — CI-Gate + Quality Foundation + CLI-Comfort + Doku — 2026-08-19
+### Fixed
 
-### Added
-- V1.5-1 CI-Gate; V1.5-2 PCC/GAIA-Lücken-Doku; V1.5-3 Elongations-Check;
-  V1.5-4 CD-Matrix-Semantik; V1.5-5 Top-Level `final.fits`; V1.5-6 dry-run factory;
-  V1.5-7 Doku-Limitationen; V1.5-8 Outlier-Rejection; V1.5-9 Star-Double-Detektor;
-  V1.5-10 inspect EQMODE/shotsInfo; V1.5-11 `--az-mode`/`--eq-mode`;
-  V1.5-12 `--pixel-scale`; V1.5-13 `--se-radius`/`--se-amount`;
-  V1.5-14 Warnings maschinenlesbar; F-RY-MINOR-V11 fixes.
+- **Offline-First Messaging** — "100% offline" corrected to **offline-first** across README, CLI-Ref, Handbook 22 §17. Pipeline runs offline; SIMBAD only on cache miss + online.
+- **Ghost Bugs Fixed** — B1: `suggest --header` no longer creates ghost folders (path from `original_target`). B2: `suggest` without `--header` auto-scans `lights\` for `OBJECT` header → cache hit without SIMBAD. B3: `orion` KB cache removed; only `astra/data/target-cache.json` (baked) remains; user `config.yaml` cache path removed.
 
-### Teststand
-- 818 passed. 3× internally approved.
+### Breaking
 
-## [v1.2] — astroalign + Gradient Removal + Quality Foundation + Plugin-Interface — 2026-08-06
+- **`astra init --non-interactive`** — New required flag for non-interactive use (scripts, CI, demo); interactive wizard remains default.
 
-### Added
-- **W9 astroalign-Integration** (registration method, default fft, fallback chain).
-- **Gradient Removal** (default off, grid 16×16, halo/nebulosity protection).
-- **Quality Foundation** (SNR/FWHM/outlier flagging, Golden Master M13/M27).
-- **Plugin-Interface** (`astra.plugins` + `astra plugin list`).
-- **Structure Enhancement** (first production plugin, `nebula_standard`).
-- **F-META-1.2 Header-Metadaten-Export** (light keys + PCC WCS + effective pixel
-  scale, `stack_scale_factor` 2.0) — fixes Siril platesolve.
-- **Internal request**: SanityGuard configurable (`--max-rotation`), shotsInfo.json
-  integration, input staging `00_input` (**breaking**: pipeline reads only
-  `generated/<ts>/00_input`).
+---
 
-### Teststand
-- 449 passed + 1 skipped. Final internal sign-off.
-
-## [v1.1] — CR-001 Multi-Group Fixes + Production Hardening — 2026-08-03
-
-### Added
-- CR-001 sign-off (W1–W14 + W7 extension); Hardening T1–T5: GAIA timeout (30s) +
-  gray-world fallback, `--no-calib`, `astra doctor`, error-handling E1,
-  synthetic test data, per-group master-darks + `dark_source`, FITS duplicate fix.
-
-### Teststand
-- 169 passed. Internal sign-off with condition (condition fulfilled).
-
-## [v1.0] — Multi-Group Stacking — 2026-07-30
-
-### Added
-- Multi-Group Stacking (auto-grouping by EXPTIME/GAIN/FILTER, shared-reference
-  registration, PCC-aware merge, CLI). Phases 1–4 complete. M13 integration test green.
+## [1.11.1] - 2026-09-06

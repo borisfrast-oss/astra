@@ -223,7 +223,13 @@ def sigma_clipped_mean(data: np.ndarray, low_sigma: float = 3.0,
 def stack_frames(registered_frames: List[Path], params: dict, is_3d: bool = False,
                  stacked_dir: Optional[Path] = None,
                  load_frame: Optional[Callable] = None,
-                 save_frame: Optional[Callable] = None) -> Optional[Path]:
+                 save_frame: Optional[Callable] = None,
+                 context=None,
+                 debayer_method: str = "superpixel",
+                 scale_window: float | None = None,
+                 drizzle_scale: float = 2.0,
+                 wcs: dict | None = None,
+                 group_hash: str | None = None) -> Optional[Path]:
     """Stack registered frames. For 3D, stacks each channel independently.
 
     Args:
@@ -273,6 +279,12 @@ def stack_frames(registered_frames: List[Path], params: dict, is_3d: bool = Fals
         is_3d=is_3d,
         load_frame=load_frame,
         save_frame=save_frame,
+        context=context,
+        debayer_method=debayer_method,
+        scale_window=scale_window,
+        drizzle_scale=drizzle_scale,
+        wcs=wcs,
+        group_hash=group_hash,
     )
 
     if output.exists():
@@ -286,7 +298,13 @@ def stack_frames_python(input_paths: List[Path], output_path: Path,
                         method: str = "average", normalization: str = "mul",
                         is_3d: bool = False,
                         load_frame: Optional[Callable] = None,
-                        save_frame: Optional[Callable] = None) -> None:
+                        save_frame: Optional[Callable] = None,
+                        context=None,
+                        debayer_method: str = "superpixel",
+                        scale_window: float | None = None,
+                        drizzle_scale: float = 2.0,
+                        wcs: dict | None = None,
+                        group_hash: str | None = None) -> None:
     """Stack frames. Handles both 2D and 3D (per-channel stacking).
 
     Args:
@@ -300,6 +318,11 @@ def stack_frames_python(input_paths: List[Path], output_path: Path,
             ``self._load_frame``).
         save_frame: Callable zum Speichern des Ergebnisses (vorher
             ``self._save_frame``).
+        context: ObservationContext for header annotation (S4, filtered per group_hash)
+        debayer_method: superpixel/malvar/bilinear/drizzle (S1, for effective XPIXSZ)
+        scale_window: 2.0 superpixel, 1.0 malvar/bilinear (S1, auto if None via debayer_method)
+        drizzle_scale: scale for drizzle (S1)
+        wcs: {ra, dec, pixel_scale_arcsec} for TAN-WCS approximate
     """
     if len(input_paths) < 2:
         raise ValueError("Need at least 2 frames to stack")
@@ -307,6 +330,48 @@ def stack_frames_python(input_paths: List[Path], output_path: Path,
     # Load all frames
     frames = [load_frame(p) for p in input_paths]
     stack = np.stack(frames, axis=0)  # (N, H, W) or (N, H, W, C)
+
+    # NGC-non_finite Guard (V1.12-NGC, whole-frame for 3D): ein RGB-Frame mit
+    # einem NaN/Inf-Pixel in irgendeinem Kanal darf nicht per-Kanal partiell
+    # eingehen (Farbartefakt). Stattdessen ganzen Frame verwerfen vor
+    # per-channel stack_2d — konservativ, farbkonsistent. Emissions-Namen
+    # stacking.non_finite_frame_skipped erfuellt AC "rg non_finite".
+    if is_3d and stack.ndim == 4:
+        # stack shape (N,H,W,C)
+        finite_mask = np.all(np.isfinite(stack), axis=(1, 2, 3))
+        if not np.all(finite_mask):
+            n_before = int(stack.shape[0])
+            for idx, ok in enumerate(finite_mask):
+                if not ok:
+                    n_bad = int(np.count_nonzero(~np.isfinite(stack[idx])))
+                    logger.warning(
+                        "stacking.non_finite_frame_skipped",
+                        frame_index=idx,
+                        frames_total=n_before,
+                        bad_pixels=n_bad,
+                        reason="non_finite_rgb_pixel",
+                    )
+                    # Legacy alias fuer bestehende rg-Suchen
+                    logger.warning(
+                        "stack.non_finite_frame",
+                        frame_index=idx,
+                        frames_total=n_before,
+                        median=None,
+                    )
+            stack = stack[finite_mask]
+            frames = [f for f, ok in zip(frames, finite_mask, strict=False) if ok]
+            if stack.shape[0] == 0:
+                raise ValueError(
+                    "stack.non_finite: all frames excluded (non-finite values or "
+                    "zero median) — refusing to write a broken stack"
+                )
+            if stack.shape[0] < 2:
+                logger.warning(
+                    "processing.stack_skipped",
+                    frames=int(stack.shape[0]),
+                    reason="insufficient_frames_after_non_finite_filter",
+                )
+                return None
 
     if is_3d:
         # Per-channel stacking: transpose to (C, N, H, W) for channel-independent ops
@@ -337,6 +402,65 @@ def stack_frames_python(input_paths: List[Path], output_path: Path,
     # V1.7-3 (AC-SCS-C1..C3): method im Log-Feld fuer Transparenz
     # (welche Stacking-Methode wurde tatsaechlich verwendet?).
     logger.info("stack.complete", output=str(output_path), frames=len(frames), is_3d=is_3d, method=method)
+    # V1.12-HEADER-PLATESOLVING S1+S2: nach save_frame annotieren (context gefiltert per group_hash S4, scale_window/drizzle_scale, wcs)
+    try:
+        from .header_utils import annotate_fits, build_effective_header
+        # Only annotate if context provided (Caller multi_group_agent passes filtered context)
+        eff_context = context
+        # S4 Gruppenfilter: if group_hash given, isolate lights for that group to avoid blind frames[0] bei Multi-Group
+        if context is not None and group_hash:
+            try:
+                from ..models.core import compute_group_hash as _cgh
+                lights = context.get_lights()  # type: ignore
+                if lights and hasattr(lights, "group_by_params"):
+                    groups_map = lights.group_by_params()  # dict tuple->FrameSet
+                    for gkey, fset in groups_map.items():
+                        try:
+                            gh = _cgh(float(gkey[0]), int(gkey[1]), str(gkey[2]))
+                        except Exception:
+                            continue
+                        if gh == group_hash and fset.frames:
+                            # Build shim context exposing only this group's lights
+                            from types import SimpleNamespace
+                            from ..models.core import FrameSet as _FS, FrameType as _FT
+                            filtered_fs = _FS(frame_type=_FT.LIGHT, frames=list(fset.frames))
+                            eff_context = SimpleNamespace(
+                                get_lights=lambda fs=filtered_fs: fs,
+                                target=getattr(context, "target", None),
+                                frames={_FT.LIGHT: filtered_fs},
+                            )
+                            break
+            except Exception:
+                eff_context = context
+        if eff_context is not None:
+            # Determine scale_window from debayer_method if not given (S1)
+            if scale_window is None:
+                if debayer_method in ("superpixel",):
+                    sw = 2.0
+                elif debayer_method in ("malvar", "malvar2004", "bilinear"):
+                    sw = 1.0
+                elif debayer_method == "drizzle":
+                    sw = 1.0  # not used, drizzle_scale governs
+                else:
+                    sw = 2.0
+            else:
+                sw = float(scale_window)
+            dm = "drizzle" if debayer_method == "drizzle" else debayer_method
+            # S5 CRPIX needs output NAXIS: result shape (H,W,C) -> NAXIS1=W, NAXIS2=H
+            try:
+                h, w = result.shape[0], result.shape[1]
+                naxis = (w, h)
+            except Exception:
+                naxis = None
+            hdr = build_effective_header(eff_context, method=dm, scale_window=sw, drizzle_scale=drizzle_scale, wcs=wcs, naxis=naxis)
+            # HISTORY kumuliert: add stack step S3 OQ-3
+            try:
+                hdr.add_history(f"Astra stack: {method}, {len(frames)} frames")
+            except Exception:
+                pass
+            annotate_fits(output_path, hdr)
+    except Exception as e:
+        logger.warning("header_annotate_failed", path=str(output_path), error=str(e))
 
 
 # Refactor: moved from processing_agent.py
@@ -361,6 +485,15 @@ def stack_2d(data: np.ndarray, method: str, normalization: str) -> np.ndarray:
                 frames_total=n_in,
                 median=(None if not np.isfinite(frame_median)
                         else round(frame_median, 6)),
+            )
+            # NGC-Alias fuer AC "stacking.non_finite_frame_skipped"
+            logger.warning(
+                "stacking.non_finite_frame_skipped",
+                frame_index=i,
+                frames_total=n_in,
+                median=(None if not np.isfinite(frame_median)
+                        else round(frame_median, 6)),
+                reason="non_finite_or_zero_median",
             )
             continue
         keep.append(i)

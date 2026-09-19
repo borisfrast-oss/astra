@@ -505,8 +505,8 @@ def get_astroalign(force: bool = False) -> Any:
         logger.warning(
             "registration.astroalign_unavailable",
             detail=(
-                "astroalign ist nicht installiert. W9-Registration nutzt "
-                'den fft-Fallback. Installation: pip install "astra[astroalign]"'
+                "astroalign is not installed. W9-registration uses "
+                'fft fallback. Install: pip install "astra[astroalign]"'
             ),
         )
     finally:
@@ -634,7 +634,7 @@ def create_registration(
             max_rotation_deg=max_rotation_deg,
             max_scale_dev=max_scale_dev,
         )
-    raise ValueError(f"Unbekannte Registrations-Methode: {method!r}")
+    raise ValueError(f"Unknown registration method: {method!r}")
 
 
 def _apply_registration_transform(
@@ -900,7 +900,31 @@ def register_frames(
     # RE-F (V1.3-24, AC-RE-F3) + V19-FIX-12 P1 Mandatory Gate 0.05:
     # Default 0.05 = Guard aktiv (entkoppelt von frame_selection.enabled),
     # Fallback/Reject greift bei corr_hp < 0.05 (V1.8-8 DEF-006, V19-FIX-12).
-    zero_shift_threshold = float(reg_cfg.get("zero_shift_threshold", 0.05))
+    # T3-SCOPED (2026-09-14, Ticket 3 Malvar Duo-Band 60s60):
+    # Global 0.05 → 0.15/0.30 würde gute Narrowband-Ha Frames (corr 0.10 legit anisotrop)
+    # fälschlich rejecten. Scoped: nur wenn FILTER Duo-Band + debayer malvar (voll 1920x1080,
+    # is_cfa True via is_3d) → Schwelle temporär auf 0.30 anheben. Grund: Malvar Duo-Band
+    # kurze Belichtung (SP 60s60 0.27 gleich, M31 Malvar 60s60 median 0.275) erzeugt
+    # 5× astroalign_downgraded→fft Zero-Shift 0/0 (corr 0.275 >0.05 → kein Guard, aber
+    # unregistriert gestacked). 0.30 erzwingt frame_rejected/zero_shift für diese Gruppe
+    # (rejected 16 → group excluded, merged 3 Gruppen sauber), andere Gruppen (120s 0.67,
+    # 90s40 0.51) bleiben >0.30 unberührt. 0.15 allein reicht nicht (0.275>0.15→PASS).
+    _base_zst = float(reg_cfg.get("zero_shift_threshold", 0.05))
+    _debayer_method = ""
+    try:
+        _debayer_method = str(params.get("debayer_method", "") or "").strip().lower()
+        if not _debayer_method and isinstance(params.get("processing_params"), dict):
+            _debayer_method = str(params["processing_params"].get("debayer_method", "") or "").strip().lower()
+    except Exception:
+        _debayer_method = ""
+    if filter_name.lower() == "duo-band" and is_3d and _debayer_method == "malvar":
+        zero_shift_threshold = max(_base_zst, 0.30)
+        logger.info("registration.zero_shift_threshold_scoped",
+                    base=_base_zst, scoped=zero_shift_threshold,
+                    filter=filter_name, debayer=_debayer_method, is_3d=is_3d,
+                    reason="T3 Malvar Duo-Band short-exposure scoped 0.30 (vs 0.05 global)")
+    else:
+        zero_shift_threshold = _base_zst
     zero_shift_fallback_enabled = bool(reg_cfg.get("zero_shift_fallback", True))
 
     # Save reference

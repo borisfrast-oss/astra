@@ -1,9 +1,48 @@
 """Configuration data models."""
 
+import importlib.resources
 from pathlib import Path
 from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _default_baked_target_cache_path() -> Path | None:
+    """T3 (V1.12-STEP2): Default baked cache via importlib.resources (ray A3).
+
+    Returns ``astro_process/data/target-cache.json`` as Path if available
+    (wheel: ``site-packages/astro_process/data/target-cache.json``,
+    dev: ``src/astro_process/data/target-cache.json`` or ``astra/data/...``).
+    Never raises — None on failure (degrades to cache-miss, not crash, S1a).
+    """
+    # 1) Try importlib.resources (Python 3.11+ files, wheel + editable)
+    try:
+        # ``astro_process.data`` is the package for ``src/astro_process/data``
+        ref = importlib.resources.files("astro_process.data") / "target-cache.json"  # type: ignore
+        # Traversable -> Path string; check is_file via try
+        try:
+            if ref.is_file():  # type: ignore[attr-defined]
+                return Path(str(ref))
+        except Exception:
+            pass
+        cand = Path(str(ref))
+        if cand.is_file():
+            return cand
+    except Exception:
+        pass
+    # 2) Fallback dev paths (repo layout, before hatch build)
+    try:
+        # src/astro_process/data/target-cache.json (editable)
+        dev_pkg = Path(__file__).resolve().parents[1] / "data" / "target-cache.json"
+        if dev_pkg.is_file():
+            return dev_pkg
+        # astra/data/target-cache.json (repo root, Proposal SSOT)
+        repo_root = Path(__file__).resolve().parents[3] / "data" / "target-cache.json"
+        if repo_root.is_file():
+            return repo_root
+    except Exception:
+        pass
+    return None
 
 
 class RegistrationConfig(BaseModel):
@@ -33,7 +72,7 @@ class RegistrationConfig(BaseModel):
     stack_scale_factor: F-META-1.2 (stella Punkt 5): Faktor der EFFEKTIVEN
         Pixelgroesse des gestackten Outputs gegenueber der nativen
         Equipment-Pixelgroesse (XPIXSZ/YPIXSZ im Light-Header). Default 2.0
-        (Teleskop (z.B. Dwarf3): nativ 1920x1080 (~2MP), Pixel 2.9 µm, Tele 150 mm —
+        (DWARF Mini: nativ 1920x1080 (~2MP), Pixel 2.9 µm, Tele 150 mm —
         der Stack ist durch den 2x2-Superpixel-Debayer genau 2x herunter-
         skaliert; KEINE 4K-Annahme mit zusaetzlichem Hardware-
         Binning) -> XPIXSZ = 2.9 x 2.0 = 5.8 µm -> Siril leitet
@@ -78,8 +117,16 @@ class GradientRemovalConfig(BaseModel):
 
     enabled: ``False`` = Default (OQ-GR-1-A: erst nach Validierung aktiv;
         bestehende Presets bleiben v1.1-identisch bis der User aktiviert).
+        T2-Entscheidung 2026-09-14 (Ticket 2 M13 G+0.55): KEIN global enabled True
+        — OQ-GR-1 historisch false bleibt, global wäre Breaking: Nebel/M31-Halo
+        wird bei Grad 2 überkorrigiert (Halo als Gradient modelliert → Ring).
+        Stattdessen CLI `--gradient-removal --gradient-removal-degree 2
+        --gradient-removal-grid 16,16` per-target testen an M13 merged
+        (Erwartet ΔG 0.557→<0.1, Rahmen+Drehung behoben, elongation <0.2).
+        background_neutralization ist Preview-only (true vs false prüft FITS
+        unbeeinflusst), PCC per-group true vs merged false separat vergleichen.
     degree: Grad des 2D-Polynom-Hintergrundmodells (2 deckt
-        Teleskop (z.B. Dwarf3)-Vignettierung + typische LP-Gradienten).
+        DWARF Mini-Vignettierung + typische LP-Gradienten).
     grid: ``(rows, cols)`` Sampling-Grid der Zellen-Mediane. Default
         (16, 16) — M13-Real-Run-Validierung (AC-GR-C4,
         s2-b4-m13-grid-validierung): 16x16 besser als 32x32
@@ -90,7 +137,7 @@ class GradientRemovalConfig(BaseModel):
         (AC-GR-B3, E1). ``None`` = Anzahl der Polynom-Terme.
     """
 
-    enabled: bool = False
+    enabled: bool = False  # T2: false bleibt Default, scoped via CLI per-target (siehe Docstring)
     degree: int = 2
     grid: tuple[int, int] = (16, 16)
     sigma_clip: float = 3.0
@@ -107,7 +154,7 @@ class CosmeticCorrectionConfig(BaseModel):
     Pixel werden vor dem Debayer durch den Median der Nachbarpixel
     derselben Bayer-Farbe (Distanz 2) ersetzt
     (``core/cosmetic.interpolate_bad_pixels``). Nur fuer CFA-Daten
-    (1080x1920, Teleskop (z.B. Dwarf3)), kein Eingriff nach dem Debayer.
+    (1080x1920, DWARF Mini), kein Eingriff nach dem Debayer.
 
     enabled: ``True`` = Stufe aktiv. Default False (bestehende Pipelines
         bleiben v1.3-identisch bis zur Freigabe — gleiche Politik wie
@@ -146,7 +193,7 @@ class FilenamePatternConfig(BaseModel):
         try:
             _re.compile(v)
         except _re.error as e:
-            raise ValueError(f"Ungültiges Regex-Pattern: {e}") from e
+            raise ValueError(f"Invalid regex pattern: {e}") from e
         return v
 
 
@@ -161,12 +208,24 @@ class FilenamePatterns(BaseModel):
     presets: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
+class PreviewConfig(BaseModel):
+    """V1.12-PREVIEW-FORMAT (AC-PREVIEW-FMT-1): Preview output format.
+
+    Konfigurierbar ueber ``preview.format`` in ``config.yaml``.
+    Default ``tiff`` (16-bit lossless, Boris-Entscheid 07.09.2026,
+    ueberlagert ADR-240 und V19-1.10-TIFF "Entscheidung offen").
+    ``jpg`` bleibt Option fuer schnelle Iteration (klein, ~500 KB).
+    """
+
+    format: Literal["tiff", "jpg"] = "tiff"
+
+
 class PreviewExportConfig(BaseModel):
     """V1.8-2 (AC-PREV-A1..A5): Preview/Export-Pipeline Einstellungen.
 
     Konfigurierbar ueber ``export.preview`` in ``config.yaml``.
     Default-Werte in diesem Model sind die V1.8-2 Feature-Defaults
-    (scnr=true, saturation=1.2, background_neutralization=true).
+    (scnr=true, saturation=1.0 T1-FIX 2026-09-14, background_neutralization=true).
     Fuer die Rueckwaertskompatibilitaet sorgt ``ProcessingParams.preview_export``,
     dessen Defaults Asinh-only sind (ohne Config-Block -> byte-identisch v1.6).
 
@@ -176,7 +235,14 @@ class PreviewExportConfig(BaseModel):
 
     stretch: Literal["asinh", "linear", "none"] = "asinh"
     scnr: bool = True
-    saturation: float = 1.2
+    # T1-FIX 2026-09-14 (Ticket 1 Preview grieselig/ausgebrannt):
+    # Global 1.2 → 1.0 neutral. Grund: asinh(1.2) überstreckt helle Sterne
+    # (Clipping 4095 → Ring, M27/C20 FITS ok, TIFF grieselig). 1.0 vermeidet
+    # Sättigungs-Boost, Ring <5% Dip, SCNR bleibt true (0.5) aber ohne
+    # zusätzliche Farbüberhöhung. Scoped Alternative: per-target
+    # suggested.yaml override (processing_params.preview_export.saturation 1.0)
+    # falls global zu konservativ. Validiert via FITS vs TIFF MAD <10%.
+    saturation: float = 1.0
     background_neutralization: bool = True
 
     @field_validator("saturation")
@@ -524,20 +590,20 @@ class PCCConfig(BaseModel):
 
 
 class SuggestConfig(BaseModel):
-    """V19-1.10-TARGET-ADVISOR (SUG-2): Optionale Config fuer ``astra suggest``.
+    """V19-1.10-TARGET-ADVISOR (SUG-2) + V1.12-STEP2 T3 (ray A3): Config fuer ``astra suggest``.
 
-    target_cache_path: Pfad zu einer target-cache.md-artigen Markdown-Datei
-        (stella-Schema, tolerant per ``core.suggest.parse_target_cache``
-        geparst). Optional (Default None) — die orion-KB
-        (``knowledge-base/agents/stella/target-cache.md``) existiert bei
-        PyPI-Installationen des Packages NICHT; das Package MUSS ohne sie
-        funktionieren (Cache-Miss-Pfad: SIMBAD-Webfetch + generischer
-        Handbook-Fallback, AC-SUG-4). Boris setzt den Pfad lokal (config.yaml)
-        auf den stella-SSOT-Pfad; ohne Eintrag ist jedes Target ein
-        Cache-Miss (kein Fehler, siehe suggest.simbad_unavailable).
+    target_cache_path: Pfad zu gebaked ``astra/data/target-cache.json``
+    (minimal, read-only, ``importlib.resources`` Default, 35 objects,
+    SIMBAD-Name/Typ/RA/Dec/Katalognummer/Aliase). T3 (V1.12-STEP2):
+    Default ist gebaked JSON via :func:`_default_baked_target_cache_path`
+    (``astro_process/data/target-cache.json`` im Wheel,
+    ``astra/data/target-cache.json`` im Repo) statt ``None``/``C:\\``-Pfad
+    (ray A3). Expliziter ``suggest.target_cache_path`` in ``config.yaml``
+    gewinnt über Default (custom path). Ohne File -> ``load_target_cache``
+    -> [] -> SIMBAD/Exit 2 (ENTS-3/4, kein Crash, S1a).
     """
 
-    target_cache_path: Optional[Path] = None
+    target_cache_path: Optional[Path] = Field(default_factory=_default_baked_target_cache_path)  # type: ignore
 
 
 class RuntimeConfig(BaseModel):
@@ -655,11 +721,15 @@ class AppConfig(BaseSettings):
     # Gate aktiv mit 0.5–2.0). Siehe PCCQualityGateConfig-Docstring.
     pcc: PCCConfig = Field(default_factory=PCCConfig)
 
-    # V19-1.10-TARGET-ADVISOR (SUG-2): optionaler target-cache.md-Pfad fuer
-    # `astra suggest` (None = kein Config-Block -> jedes Target ist ein
-    # Cache-Miss, SIMBAD/Handbook-Fallback greift, AC-SUG-4). PyPI-Pakete
-    # ohne die orion-KB funktionieren dadurch unveraendert (kein Breaking).
-    suggest: Optional[SuggestConfig] = None
+    # V19-1.10-TARGET-ADVISOR (SUG-2) + V1.12-STEP2 T3 (ray A3): gebaked JSON Default
+    # statt None (AC-T3, S1a). ``suggest`` ist jetzt immer vorhanden (Default
+    # ``SuggestConfig`` mit ``target_cache_path`` = baked ``astro_process/data/
+    # target-cache.json`` via ``importlib.resources``, statt ``None`` -> immer
+    # Cache-Miss). Expliziter ``suggest.target_cache_path`` in config.yaml
+    # gewinnt (Boris' lokaler Pfad auf orion KB bis deprecated, ray A4).
+    # Vorher: None -> jedes Target Cache-Miss (AC-SUG-4); jetzt: baked Hit
+    # permissiv (offline bekanntes Target jetzt Hit statt Exit 2, nicht restriktiv).
+    suggest: SuggestConfig = Field(default_factory=SuggestConfig)  # type: ignore
 
     # V1.6-1 (SSOT-C): Konfigurierbare Filename-Patterns.
     # Precedence: Config-Patterns > hardcoded Defaults (AC-SSOT-C4).
@@ -675,11 +745,17 @@ class AppConfig(BaseSettings):
     # oder "bilinear" (deprecated, Grace v1.8).
     debayer_method: Optional[Literal["superpixel", "bilinear", "malvar"]] = None
 
+    # V1.12-PREVIEW-FORMAT (AC-PREVIEW-FMT-1): Preview output format.
+    # Default tiff 16-bit lossless (Boris-Entscheid 07.09.2026, ueberlagert
+    # ADR-240 und V19-1.10-TIFF "Entscheidung offen").
+    # CLI --preview-format ueberschreibt Config (Precedence CLI > Config > Default).
+    preview: PreviewConfig = Field(default_factory=PreviewConfig)
+
     # V1.8-2 (AC-PREV-A1..A5): Preview/Export-Pipeline Einstellungen.
     # None = kein Config-Block -> Preset-Default (Asinh-only, byte-identisch v1.6).
     export: Optional[ExportConfig] = None
 
-    # CR-001 W4 (P4): Flats/Bias Config-Defaults (Teleskop (z.B. Dwarf3): keine Flats, Bias im Dark)
+    # CR-001 W4 (P4): Flats/Bias Config-Defaults (DWARF Mini: keine Flats, Bias im Dark)
     use_flats: bool = False
     use_bias: bool = False
 

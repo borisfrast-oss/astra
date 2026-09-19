@@ -134,8 +134,8 @@ class TestSyntheticGenerator:
             assert astra_paths == gen_paths
 
     def test_group_key_format(self):
-        """group_key matches astra's compute_group_hash format."""
+        """group_key matches astra's compute_group_hash format (klein-normiert)."""
         assert synthetic.group_key(15.0, 60) == "15s60"
         assert synthetic.group_key(60, 60) == "60s60"
-        assert synthetic.group_key(60.0, 40, "Duo-Band") == "60s40_Duo-Band"
+        assert synthetic.group_key(60.0, 40, "Duo-Band") == "60s40_duo-band"
         assert synthetic.group_key(15.0, 60, "none") == "15s60"

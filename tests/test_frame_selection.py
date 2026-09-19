@@ -519,16 +519,16 @@ class TestFSEL_D:
             with patch("astro_process.cli._run_with_timeout", return_value=MagicMock()):
                 result = runner.invoke(cli, ["-c", "config.yaml", "doctor"])
             assert result.exit_code in (0, 1), result.output
-            assert "Frame-Selection AKTIV" in result.output
+            assert "Frame-Selection active" in result.output
             assert "keep=85" in result.output
             assert "weights" in result.output.lower()
-            # Inaktiv-Fall: Default aus
+            # Inactive case: default off
             Path("config.yaml").write_text(yaml.safe_dump(yaml.safe_load(DEFAULT_CONFIG)), encoding="utf-8")
-            # data_root wieder setzen (DEFAULT ist C:/Astra, im isolated fs nicht existent → fail, daher . setzen)
+            # data_root reset (DEFAULT is C:/Astra, not present in isolated fs → fail, use . instead)
             data2 = yaml.safe_load(DEFAULT_CONFIG)
             data2["data_root"] = "."
             Path("config.yaml").write_text(yaml.safe_dump(data2), encoding="utf-8")
             with patch("astro_process.cli._run_with_timeout", return_value=MagicMock()):
                 result2 = runner.invoke(cli, ["-c", "config.yaml", "doctor"])
             assert result2.exit_code in (0, 1), result2.output
-            assert "Frame-Selection inaktiv" in result2.output
+            assert "Frame-Selection inactive" in result2.output

@@ -40,11 +40,12 @@ cfa_drizzle:
   quality_gate:
     mode: "auto"
     rejection_enabled: true
-    thresholds:
-      fwhm: [1.5, 5.0]
-      snr: [10, null]
-      star_count: [20, null]
-      correlation: [0.3, null]
+    # thresholds: auto -> CFA_DEFAULTS (fwhm [1.0,8.0], snr [1.5,null], star_count [1,null], corr [0.1,null]) via model_fields_set
+    # thresholds:
+    #   fwhm: [1.0, 8.0]
+    #   snr: [1.5, null]
+    #   star_count: [1, null]
+    #   correlation: [0.1, null]
     elongation_unusable: true
     min_stars_cfa: 3
   min_frames: 5

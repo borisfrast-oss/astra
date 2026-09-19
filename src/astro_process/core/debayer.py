@@ -209,17 +209,21 @@ def apply_bzero(data: np.ndarray, bzero: float = 32768.0) -> np.ndarray:
     return data.astype(np.float32) - bzero
 
 
-def debayer_fits(input_path: Path, output_path: Path, method: str = "superpixel") -> np.ndarray:
+def debayer_fits(input_path: Path, output_path: Path, method: str = "superpixel", context=None, wcs: dict | None = None, scale_window: float | None = None, drizzle_scale: float = 2.0) -> np.ndarray:
     """Debayer a single FITS file and save as 3D RGB FITS.
     
-    Handles BZERO/BSCALE unsigned encoding common in Teleskop (z.B. Dwarf3) FITS.
+    Handles BZERO/BSCALE unsigned encoding common in DWARF Mini FITS.
     
     Args:
         input_path: Path to input 2D CFA FITS
         output_path: Path to output 3D RGB FITS
         method: Debayer method - "superpixel" (default, DADR-003), "bilinear"
             (deprecated, Grace v1.8) or "malvar" (High-Quality, volle Auflösung)
-        
+        context: ObservationContext for header annotation (S4, filtered per group)
+        wcs: {ra, dec, pixel_scale_arcsec} for TAN-WCS approximate
+        scale_window: override for effective pixel (2.0 superpixel, 1.0 malvar, S1) — auto if None
+        drizzle_scale: for drizzle only (2.0 -> 1.45, S1)
+    
     Returns:
         The RGB data array
     """
@@ -227,7 +231,7 @@ def debayer_fits(input_path: Path, output_path: Path, method: str = "superpixel"
         header = hdul[0].header
         data = hdul[0].data.astype(np.float32)
         
-        # Handle BZERO offset (Teleskop (z.B. Dwarf3) unsigned 16-bit encoding)
+        # Handle BZERO offset (DWARF Mini unsigned 16-bit encoding)
         bzero = header.get("BZERO", 0.0)
         if bzero != 0.0:
             data = data - bzero
@@ -247,6 +251,39 @@ def debayer_fits(input_path: Path, output_path: Path, method: str = "superpixel"
     hdu.header["CTYPE3"] = "RGB"
     hdu.header["CUNIT3"] = "channel"
     hdu.writeto(output_path, overwrite=True)
+    
+    # V1.12-HEADER-PLATESOLVING S1+S2: nach writeto annotieren (scale_window 2.0 superpixel->5.8 /1.0 malvar->2.9, S1)
+    try:
+        from .header_utils import annotate_fits, build_effective_header
+        # Determine scale_window if not provided (S1)
+        if scale_window is None:
+            if method == "superpixel":
+                sw = 2.0
+            elif method in ("malvar", "malvar2004", "bilinear"):
+                sw = 1.0
+            else:
+                sw = 2.0
+        else:
+            sw = float(scale_window)
+        # Determine NAXIS for S5 CRPIX correctness
+        out_h, out_w = rgb.shape[0], rgb.shape[1]
+        # FITS NAXIS1=W, NAXIS2=H (after transpose, shape C,H,W)
+        naxis = (out_w, out_h)
+        # Build wcs fallback if needed: compute pixel scale from effective
+        eff_wcs = wcs
+        if eff_wcs is None:
+            # Try to build minimal wcs from context's RA/DEC if available for immediate WCS
+            try:
+                if context is not None and hasattr(context, "target") and context.target.ra is not None and context.target.dec is not None:
+                    # Compute pixel scale via native*scale fallback for placeholder
+                    eff_wcs = {"ra": context.target.ra, "dec": context.target.dec, "pixel_scale_arcsec": 0.0}
+            except Exception:
+                eff_wcs = None
+        hdr = build_effective_header(context, method=method, scale_window=sw, drizzle_scale=drizzle_scale, wcs=eff_wcs, naxis=naxis)
+        annotate_fits(output_path, hdr)
+    except Exception as e:
+        import structlog as _sl
+        _sl.get_logger(__name__).warning("header_annotate_failed", path=str(output_path), error=str(e))
     
     return rgb
 

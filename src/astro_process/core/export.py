@@ -36,7 +36,7 @@ import structlog
 from astropy.io import fits
 
 from ..core.fits_parser import EQMODE_KEY
-from ..core.preview import create_preview_jpg
+from ..core.preview import create_preview, create_preview_jpg
 from ..core.seq_file import write_seq
 from ..models.core import ObservationContext
 
@@ -57,52 +57,11 @@ EXPORT_LIGHT_HEADER_KEYS = (
 )
 
 
-# Refactor: moved from processing_agent.py
-def effective_pixel_size_um(
-    light_cards: dict,
-    wcs: dict | None,
-    stack_scale_factor: float = 2.0,
-) -> float | None:
-    """F-META-1.2 (stella Punkt 5): effektive Pixelgroesse des gestackten
-    Frames in µm — so, dass Siril daraus die korrekte Pixel-Scale ableitet
-    (Siril ignoriert CDELT als Startvorgabe und rechnet 206.265 x XPIXSZ /
-    FOCALLEN).
-
-    - PCC-Skala vorhanden + FOCALLEN: ``pixel_scale x FOCALLEN / 206.265``
-      (Pixelgroesse aus der gemessenen Skala zurueckgerechnet).
-    - sonst Fallback: nativer XPIXSZ/YPIXSZ x ``stack_scale_factor``
-      (Default 2.0, Teleskop (z.B. Dwarf3): nativ 2.9 µm, 2x Superpixel-Debayer).
-
-    Beide Wege ergeben dieselbe effektive Pixelgroesse, wenn
-    ``stack_scale_factor`` dem tatsaechlichen Binning-Faktor entspricht
-    (2.9 x 2.0 = 5.8 µm -> 206.265 x 5.8 / 150 = 7.98 arcsec/px).
-
-    Returns:
-        Effektive Pixelgroesse in µm oder ``None`` (best effort: nicht
-        bestimmbar — keine Aenderung, keine Fehler).
-    """
-    scale = (wcs or {}).get("pixel_scale_arcsec", 0.0) or 0.0
-    focal = light_cards.get("FOCALLEN")
-    if scale > 0 and focal:
-        try:
-            focal_f = float(focal)
-        except (TypeError, ValueError):
-            focal_f = 0.0
-        if focal_f > 0:
-            return float(scale) * focal_f / 206.265
-    # Fallback (kein PCC / FOCALLEN fehlt): nativer Wert x Faktor
-    native = light_cards.get("XPIXSZ") or light_cards.get("YPIXSZ")
-    if native:
-        try:
-            native_f = float(native)
-        except (TypeError, ValueError):
-            return None
-        if native_f > 0:
-            return native_f * float(stack_scale_factor)
-    return None
+# V1.12-HEADER-PLATESOLVING (OQ-1, S1): effective_pixel_size_um nach header_utils verschieben (DRY) + Re-Export für Kompatibilität
+from .header_utils import effective_pixel_size_um  # Re-Export for compatibility
 
 
-# Refactor: moved from processing_agent.py
+# Refactor: moved from processing_agent.py + V1.12 unified via header_utils (OQ-1, S1)
 def annotate_export_header(
     fits_path: Path,
     context: ObservationContext | None,
@@ -110,112 +69,82 @@ def annotate_export_header(
     stack_scale_factor: float = 2.0,
     effective_pixel_size_um_fn: Callable[[dict, dict | None, float], float | None] | None = None,
 ) -> None:
-    """F-META-1.2: reichert den Header eines Export-FITS best-effort an.
+    """F-META-1.2: reichert den Header eines Export-FITS best-effort an (vereinheitlicht via header_utils S1).
+
+    Delegiert an ``core.header_utils.build_effective_header`` + ``annotate_fits``
+    (DRY, OQ-1 entschieden). Verhalten identisch zu vorheriger Implementierung,
+    nur SSOT zentralisiert: Light-Header-Keys + effektive XPIXSZ/YPIXSZ + TAN-WCS.
 
     - Light-Header-Keys (``EXPORT_LIGHT_HEADER_KEYS``) aus dem ersten
-      Light-Frame (``context.get_lights().frames[0].header.raw_cards``).
-    - XPIXSZ/YPIXSZ werden auf die EFFEKTIVE Pixelgroesse des gestackten
-      Outputs gesetzt (stella Punkt 5): PCC-Skala vorhanden -> aus der
-      gemessenen Skala zurueckgerechnet, sonst nativer Wert x
-      ``stack_scale_factor`` (Default 2.0). WCS/CDELT bleiben unveraendert.
-    - Approximatives TAN-WCS (CRVAL/CRPIX/CDELT/CTYPE/CUNIT) aus ``wcs``
-      {ra, dec, pixel_scale_arcsec} — Naeherung, kein Astrometrie-Fit
-      (Befund 7, Siril/Plate-Solving).
-    - Best effort: fehlende Daten/Fehler -> Header unveraendert, keine
-      Ausnahme. Daten werden nie veraendert, nur der Header (additiv).
+      Light-Frame.
+    - XPIXSZ/YPIXSZ effektive Pixelgroesse via PCC-Skala oder native*stack_scale_factor.
+    - Approximatives TAN-WCS aus ``wcs`` {ra, dec, pixel_scale_arcsec}.
 
-    Loggt ``export.header_annotated`` (keys_count, wcs, pixel_size_um,
-    pixel_size_adjusted).
-
-    Args:
-        fits_path: Pfad zum Export-FITS (wird in-place aktualisiert).
-        context: ObservationContext fuer die Light-Frame-Header
-            (``None`` -> keine Light-Keys).
-        wcs: {ra, dec, pixel_scale_arcsec} fuer approximatives TAN-WCS
-            (``None`` -> kein WCS).
-        stack_scale_factor: Binning-Faktor fuer die effektive Pixelgroesse
-            (Default 2.0, Teleskop (z.B. Dwarf3): 2x Superpixel-Debayer).
-        effective_pixel_size_um_fn: Callable fuer die effektive
-            Pixelgroesse (Default: Modul-Funktion ``effective_pixel_size_um``;
-            austauschbar fuer Tests/Ersetzbarkeit).
+    Best effort: fehlende Daten/Fehler -> Header unveraendert, keine Ausnahme.
+    Loggt ``export.header_annotated`` via header_utils (auch ``header_annotated``).
     """
-    if effective_pixel_size_um_fn is None:
-        effective_pixel_size_um_fn = effective_pixel_size_um
-    light_cards: dict = {}
-    if context is not None:
-        try:
-            frames = context.get_lights().frames
-            if frames and frames[0].header is not None:
-                light_cards = getattr(frames[0].header, "raw_cards", None) or {}
-        except Exception:  # noqa: BLE001 - best effort (F-META-1.2)
-            light_cards = {}
-    if not light_cards and not wcs:
-        return
+    # // Obsolet: Legacy-Injection entfernt — effective_pixel_size_um_fn bleibt in Signatur für Backward-Compat, wird aber ignoriert // Handbook Kap.04 verlangt Header via header_utils.build_effective_header // Gate: test_v1_12_header_platesolving deckt echten Fall ab (Kap.8c Typ B zurückgenommen, DRY SSOT)
+    # Unified path via header_utils (OQ-1, S1)
     try:
-        with fits.open(fits_path, mode="update") as hdul:
-            header = hdul[0].header
-            keys_written = 0
-            for key in EXPORT_LIGHT_HEADER_KEYS:
-                value = light_cards.get(key)
-                if value not in (None, ""):
-                    header[key] = value
-                    keys_written += 1
-            # F-META-1.2 (stella Punkt 5): XPIXSZ/YPIXSZ auf die
-            # EFFEKTIVE Pixelgroesse setzen — Siril ignoriert CDELT und
-            # leitet die Pixel-Scale aus XPIXSZ/FOCALLEN ab; mit dem
-            # nativen Wert (2.9) kaeme 3.99 statt real 7.98 arcsec/px
-            # -> Platesolve schlaegt fehl.
-            pixel_size_adjusted = False
-            pixel_size_um: float | None = None
-            effective_pixel = effective_pixel_size_um_fn(
-                light_cards, wcs, stack_scale_factor,
-            )
-            if effective_pixel is not None:
-                header["XPIXSZ"] = effective_pixel
-                header["YPIXSZ"] = effective_pixel
-                header.add_comment(
-                    "Pixel size adjusted for stacked scale (PCC)"
-                )
-                pixel_size_adjusted = True
-                pixel_size_um = round(effective_pixel, 4)
-            wcs_written = False
-            if wcs:
-                ra = wcs.get("ra")
-                dec = wcs.get("dec")
-                scale = wcs.get("pixel_scale_arcsec", 0.0)
-                if ra is not None and dec is not None and scale and scale > 0:
-                    naxis1 = header.get("NAXIS1", 0)
-                    naxis2 = header.get("NAXIS2", 0)
-                    header["CRVAL1"] = float(ra)
-                    header["CRVAL2"] = float(dec)
-                    header["CRPIX1"] = (naxis1 + 1) / 2.0 if naxis1 else 0.0
-                    header["CRPIX2"] = (naxis2 + 1) / 2.0 if naxis2 else 0.0
-                    header["CDELT1"] = -float(scale) / 3600.0
-                    header["CDELT2"] = float(scale) / 3600.0
-                    header["CTYPE1"] = "RA---TAN"
-                    header["CTYPE2"] = "DEC--TAN"
-                    header["CUNIT1"] = "deg"
-                    header["CUNIT2"] = "deg"
-                    header.add_comment(
-                        "Approximate WCS from target/PCC - not an "
-                        "astrometric fit"
-                    )
-                    wcs_written = True
-            logger.info(
-                "export.header_annotated",
-                path=str(fits_path),
-                keys_count=keys_written,
-                wcs=wcs_written,
-                pixel_size_um=pixel_size_um,
-                pixel_size_adjusted=pixel_size_adjusted,
-            )
-    except Exception as e:  # noqa: BLE001 - F-META-1.2 best effort
-        logger.warning(
-            "export.header_annotate_failed",
-            path=str(fits_path),
-            error=str(e),
-            msg="Final export header left unchanged (best effort)",
-        )
+        from .header_utils import annotate_fits, build_effective_header
+        # Map stack_scale_factor to scale_window (superpixel vs malvar detection via factor)
+        # If stack_scale_factor is 2.0 -> superpixel, 1.0 -> malvar; otherwise use directly
+        if abs(float(stack_scale_factor) - 2.0) < 1e-9:
+            method = "superpixel"
+            scale_window = 2.0
+        elif abs(float(stack_scale_factor) - 1.0) < 1e-9:
+            method = "malvar2004"
+            scale_window = 1.0
+        else:
+            method = "superpixel" if float(stack_scale_factor) >= 1.5 else "malvar2004"
+            scale_window = float(stack_scale_factor)
+        # Try to infer NAXIS for S5 CRPIX correctness
+        naxis = None
+        try:
+            with fits.open(fits_path) as hdul:
+                naxis1 = hdul[0].header.get("NAXIS1")
+                naxis2 = hdul[0].header.get("NAXIS2")
+                if naxis1 and naxis2:
+                    naxis = (int(naxis1), int(naxis2))
+        except Exception:
+            naxis = None
+        hdr = build_effective_header(context, method=method, scale_window=scale_window, drizzle_scale=2.0, wcs=wcs, naxis=naxis)
+        # // Obsolet: Doppelter Early-Return entfernt — header_utils.py:260 reicht als SSOT für Leerfall // Gate: test_v1_12_header_platesolving deckt echten Fall ab (Kap.8c Typ B zurückgenommen)
+        # Direct in-place update with export logger (to keep test expecting export.header_annotated/failed)
+        try:
+            with fits.open(fits_path, mode="update") as hdul:
+                if len(hdul) == 0:
+                    raise ValueError("empty HDU")
+                tgt = hdul[0].header
+                # S5 CRPIX correction via file NAXIS already in hdr if naxis provided; still patch if needed
+                # Merge hdr cards
+                for k, v in hdr.items():
+                    if k == "HISTORY":
+                        continue
+                    if not k or k.strip() == "":
+                        continue
+                    tgt[k] = v
+                for card in hdr.cards:
+                    if card.keyword == "HISTORY":
+                        tgt.add_history(card.value)
+                    elif card.keyword == "COMMENT":
+                        if card.value not in [c.value for c in tgt.cards if c.keyword == "COMMENT"]:
+                            tgt.add_comment(card.value)
+                hdul.flush()
+            # Emit export-specific log for backward compat (matches old test)
+            try:
+                with fits.open(fits_path) as hdul:
+                    h = hdul[0].header
+                    has_wcs = "CTYPE1" in h and h.get("CTYPE1") == "RA---TAN"
+                    has_pix = "XPIXSZ" in h
+                    logger.info("export.header_annotated", path=str(fits_path), keys_count=len([k for k in EXPORT_LIGHT_HEADER_KEYS if k in h]), wcs=has_wcs, pixel_size_um=h.get("XPIXSZ"), pixel_size_adjusted=has_pix)
+            except Exception:
+                logger.info("export.header_annotated", path=str(fits_path), keys_count=0, wcs=False, pixel_size_um=None, pixel_size_adjusted=False)
+        except Exception as e:
+            logger.warning("export.header_annotate_failed", path=str(fits_path), error=str(e), msg="Final export header left unchanged (best effort)")
+        return
+    except Exception as e:
+        logger.warning("export.header_annotate_failed", path=str(fits_path), error=str(e), msg="Final export header left unchanged (best effort)")
 
 
 # Refactor: moved from processing_agent.py
@@ -372,8 +301,12 @@ def export(
     annotate_export_header_fn: Callable[..., None] | None = None,
     preview_config: Optional["PreviewExportConfig"] = None,
     export_config: Optional["ExportConfig"] = None,
+    preview_format: str = "tiff",
 ) -> List[Path]:
-    """Export as 32-bit FITS only (linear, RGB, unstreched) + auto-stretched JPG preview.
+    """Export as 32-bit FITS only (linear, RGB, unstreched) + auto-stretched preview.
+
+    V1.12-PREVIEW-FORMAT: preview is format-aware (TIFF 16-bit Default /
+    JPG Fallback, CLI > Config > Default).
 
     F-META-1.2: wenn ``context`` gegeben, wird der Final-FITS-Header
     best-effort angereichert (Light-Header-Keys + approximatives WCS +
@@ -432,9 +365,14 @@ def export(
         if stretched:
             exports.append(stretched)
 
-    # Auto-stretched JPG preview (for quick visual inspection without Siril)
-    jpg_out = working_dir / f"{safe_name}_final_preview.jpg"
-    preview = create_preview_jpg(fits_out, jpg_out, preview_config=preview_config)
+    # Auto-stretched preview (for quick visual inspection without Siril)
+    # V1.12-PREVIEW-FORMAT: TIFF 16-bit Default (~10-50 MB) vs JPG ~500 KB
+    fmt = str(preview_format).strip().lower() if isinstance(preview_format, str) else "tiff"
+    if fmt not in ("tiff", "jpg"):
+        fmt = "tiff"
+    ext = ".tiff" if fmt == "tiff" else ".jpg"
+    preview_out = working_dir / f"{safe_name}_final_preview{ext}"
+    preview = create_preview(fits_out, preview_out, format=fmt, preview_config=preview_config)
     if preview:
         exports.append(preview)
 
@@ -442,5 +380,5 @@ def export(
     seq_path = working_dir / "final.seq"
     write_seq(seq_path, [fits_out], prefix=f"{safe_name}_final")
 
-    logger.info("pipeline.export_complete", formats=[".fits", ".jpg" if preview else ""])
+    logger.info("pipeline.export_complete", formats=[".fits", ext if preview else ""])
     return exports

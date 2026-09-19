@@ -392,7 +392,7 @@ class TestCliGradientRemovalFlags:
                   "--gradient-removal-grid", "nope"]
         )
         assert result.exit_code != 0
-        assert "Ungueltiges --gradient-removal-grid" in result.output
+        assert "Invalid --gradient-removal-grid" in result.output
 
     def test_config_enabled_applies_without_cli_flag(self, tmp_path):
         """Config gradient_removal.enabled=true wirkt ohne CLI-Flag

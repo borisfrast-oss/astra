@@ -157,7 +157,7 @@ def test_create_registration_dispatcher():
     assert isinstance(aa, registration.AstroalignRegistration)
     assert aa._max_control_points == 10
 
-    with pytest.raises(ValueError, match="Unbekannte"):
+    with pytest.raises(ValueError, match="Unknown registration method"):
         registration.create_registration("mystery")
 
 
@@ -503,6 +503,7 @@ def _block_image(size: int = 64) -> np.ndarray:
     return img
 
 
+# // Legacy: behalte weil Registration-Test (FFT/astroalign) synthetische Geometrie prüft, nicht Header — minimaler 2D-Rahmen ohne FOCALLEN/XPIXSZ bewusst // Gate: test_v1_12_header_platesolving deckt echten DWARF-Header ab (5.8/2.9/1.45) // Kap.4 Matrix behalten, Kap.8b C19 5.8 nicht betroffen
 def _write_2d_frame(path: Path, data: np.ndarray) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     fits.PrimaryHDU(data.astype(np.float32)).writeto(path, overwrite=True)
@@ -1373,21 +1374,21 @@ class TestV13Recommendation:
         assert rec is not None
         assert rec["method"] == "astroalign"
         assert "--max-rotation 30" in rec["suggested_cli"]
-        assert "Feldrotation" in rec["reason"]
+        assert "field rotation" in rec["reason"]
 
     def test_re_a_2_duo_eq_astroalign_default_rotation(self):
         rec = _run_recommendation("DUO-BAND 7nm", eq=True)
         assert rec is not None
         assert rec["method"] == "astroalign"
         assert "max-rotation" not in rec["suggested_cli"]
-        assert "keine Feldrotation" in rec["reason"]
+        assert "no field rotation" in rec["reason"]
 
     def test_re_a_3_duo_unknown_astroalign_with_rotation(self):
         rec = _run_recommendation("DUO-BAND 7nm", eq=None)
         assert rec is not None
         assert rec["method"] == "astroalign"
         assert "--max-rotation 30" in rec["suggested_cli"]
-        assert "unbekannt" in rec["reason"]
+        assert "unknown" in rec["reason"]
 
     def test_re_a_4_broadband_eq_no_recommendation(self):
         assert _run_recommendation("OIII 6.5nm", eq=True) is None
@@ -1398,7 +1399,7 @@ class TestV13Recommendation:
         assert rec is not None
         assert rec["method"] == "astroalign"
         assert "--max-rotation 30" in rec["suggested_cli"]
-        assert "FFT-Korrelation" in rec["reason"]
+        assert "FFT-correlation" in rec["reason"]
 
     def test_re_a_6_broadband_unknown_no_recommendation(self):
         assert _run_recommendation("OIII 6.5nm", eq=None) is None
@@ -1784,9 +1785,9 @@ def test_doctor_lists_all_w9_deps_ok():
             result = runner.invoke(cli, ["-c", "config.yaml", "doctor"])
 
     assert result.exit_code in (0, 1), result.output
-    assert "[OK] astroalign importierbar" in result.output
-    assert "[OK] sep importierbar" in result.output
-    assert "[OK] scikit-image importierbar" in result.output
+    assert "[OK] astroalign importable" in result.output
+    assert "[OK] sep importable" in result.output
+    assert "[OK] scikit-image importable" in result.output
 
 
 def test_doctor_warns_when_astroalign_missing(
@@ -1803,8 +1804,8 @@ def test_doctor_warns_when_astroalign_missing(
             result = runner.invoke(cli, ["-c", "config.yaml", "doctor"])
 
     assert result.exit_code == 1, result.output
-    assert "[WARN] astroalign fehlt" in result.output
-    assert "astra[astroalign]" in result.output
+    assert "[WARN] astroalign missing" in result.output
+    assert "astroalign]" in result.output  # matches both astra[astroalign] and astra-pipeline[astroalign]
 
 # ═══════════════════════════════════════════════════════════════════
 # Section: W9-D — Cross-Group-Registration

@@ -1,6 +1,6 @@
 # Chapter 20 – Dwarf mini Imaging Recommendations
 
-# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini` (alias `dwarf3` deprecated since V19)
+# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini`
 
 ---
 
@@ -8,7 +8,7 @@
 
 This chapter describes optimal recording parameters for the Dwarf mini in combination with Siril 1.4.4.
 
-> **Note (V19):** Since V19 the profile is named `dwarf_mini`; `dwarf3` remains as a deprecated alias for compatibility. Hardware identical.
+> **Note:** The equipment profile is named `dwarf_mini`; `dwarf3` is a deprecated alias (kept for backward compatibility).
 
 It's not about post-processing, but the most important foundation:
 

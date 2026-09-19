@@ -87,9 +87,16 @@ class CalibrationAgent:
         groups = context.get_lights().group_by_params()
         result.master_dark = self._create_master_darks(context, groups, result)
         
-        # 2. Create master bias
-        if context.calibration.bias_available:
+        # 2. Create master bias — skip when use_bias is False in config (e.g. Dwarf Mini
+        # embeds bias in dark; building master_bias would be misleading/wasteful).
+        _use_bias = getattr(self.config, "use_bias", True) if self.config is not None else True
+        if context.calibration.bias_available and _use_bias:
             result.master_bias = self._create_master_bias(context)
+        elif context.calibration.bias_available and not _use_bias:
+            logger.info(
+                "calibration.master_bias_skipped",
+                reason="use_bias=false in config (bias embedded in dark)",
+            )
         
         # 3. Create master flat(s)
         if context.calibration.flat_available:
@@ -434,6 +441,34 @@ class CalibrationAgent:
 
                 hdu = fits.PrimaryHDU(calibrated_data.astype(np.float32))
                 hdu.writeto(output, overwrite=True)
+                # V1.12-HEADER-PLATESOLVING 2a: nach writeto annotieren (internal but platesolve-fähig, nicht 6-Keys-leer)
+                # 01_calibrated internal markiert via header, qc --check-header Ausnahme greift, aber nun annotiert mit nativ XPIXSZ
+                try:
+                    from ..core.header_utils import annotate_fits, build_effective_header
+                    # 01_calibrated scale 1.0 (noch nicht debayered) -> XPIXSZ 2.9, XBINNING 1, EQUINOX etc
+                    # Use group-filtered context approximation: filter lights to this group_hash via private helper if available
+                    calib_context = context
+                    # Attempt group-filtered extraction for S4: if context has multiple groups, try to isolate
+                    try:
+                        # Build minimal filtered context: reuse raw_cards from this specific light's header for S4 accuracy
+                        from ..models.core import FrameSet, FrameType
+                        # Create a pseudo context with single light for this group's RA/DEC
+                        # Use the light's own header raw_cards as fallback if context group mixing
+                        light_raw = getattr(light.header, "raw_cards", None) or {}
+                        # Build a tiny dict-like context shim that _extract_light_cards will handle via ref_header fallback
+                        # Simpler: pass original context but also pass ref_header = light_raw for strongest group accuracy
+                        hdr = build_effective_header(context, method="superpixel", scale_window=1.0, drizzle_scale=2.0, wcs=None, ref_header=light_raw)
+                    except Exception:
+                        hdr = build_effective_header(context, method="superpixel", scale_window=1.0, drizzle_scale=2.0, wcs=None)
+                    # Replace debayer HISTORY with calibration internal marker (S3, nicht nutzer-sichtbar)
+                    try:
+                        hdr.remove("HISTORY", remove_all=True)
+                    except Exception:
+                        pass
+                    hdr.add_history("Astra calibration: internal")
+                    annotate_fits(output, hdr)
+                except Exception as _e:
+                    logger.warning("header_annotate_failed", path=str(output), error=str(_e))
                 calibrated.append(output)
 
                 # Track dark source for reporting (W5)

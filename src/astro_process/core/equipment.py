@@ -110,7 +110,7 @@ def detect_mount_type(header: Any) -> str:
     if telescop.strip() == "":
         logger.warning(
             "discovery.mount_unknown",
-            detail="Mount-Type unbekannt, Default EQ angenommen; Profil setzen empfohlen",
+            detail="Mount type unknown, defaulting to EQ; setting a profile is recommended",
         )
     return "eq"
 
@@ -466,13 +466,13 @@ def resolve_equipment(
                     "discovery.equipment.inconsistent_header",
                     field=field,
                     msg=(
-                        f"Equipment-Feld {field}: abweichende Header-Werte "
-                        f"ueber die Lights — Majority gewinnt"
+                        f"Equipment field {field}: differing header values "
+                        f"across lights — majority wins"
                     ),
                 )
                 report["warnings"].append(
-                    f"equipment: inkonsistente Header-Werte fuer {field} "
-                    f"— Majority gewinnt ({hval})"
+                    f"equipment: inconsistent header values for {field} "
+                    f"— majority wins ({hval})"
                 )
 
             if hval is not None:
@@ -485,14 +485,14 @@ def resolve_equipment(
                         config=cval,
                         profile=getattr(profile, "name", None),
                         msg=(
-                            f"Header und Config-Profil liefern unterschiedliche "
-                            f"Werte fuer {field} — Header gewinnt (SSOT)"
+                            f"Header and config profile provide different "
+                            f"values for {field} — header wins (SSOT)"
                         ),
                     )
                     report["warnings"].append(
-                        f"equipment: {field} Header/Config-Widerspruch "
-                        f"(Header {hval} vs. Profil "
-                        f"{getattr(profile, 'name', '?')}: {cval}) — Header gewinnt"
+                        f"equipment: {field} header/config conflict "
+                        f"(header {hval} vs. profile "
+                        f"{getattr(profile, 'name', '?')}: {cval}) — header wins"
                     )
             elif cval is not None:
                 logger.warning(
@@ -502,13 +502,13 @@ def resolve_equipment(
                     value=cval,
                     source="config",
                     msg=(
-                        f"Equipment-Feld {field} fehlt im Light-Header — "
-                        f"Config-Profil greift"
+                        f"Equipment field {field} missing from light header — "
+                        f"config profile applies"
                     ),
                 )
                 report["warnings"].append(
-                    f"equipment: {field} aus Config-Profil "
-                    f"'{getattr(profile, 'name', '?')}' (Fallback, fehlt im Header)"
+                    f"equipment: {field} from config profile "
+                    f"'{getattr(profile, 'name', '?')}' (fallback, missing from header)"
                 )
                 value, source = cval, "config"
             else:
@@ -516,12 +516,12 @@ def resolve_equipment(
                     "discovery.equipment.unknown_field",
                     field=field,
                     msg=(
-                        f"Equipment-Feld {field} weder im Header noch per "
-                        f"Config-Profil verfuegbar — bleibt None"
+                        f"Equipment field {field} neither in header nor via "
+                        f"config profile available — stays None"
                     ),
                 )
                 report["warnings"].append(
-                    f"equipment: {field} unbekannt (weder Header noch Config-Profil)"
+                    f"equipment: {field} unknown (neither header nor config profile)"
                 )
                 value, source = None, "none"
 
@@ -572,7 +572,7 @@ def resolve_equipment(
         logger.warning(
             "discovery.equipment.resolve_failed",
             error=str(e),
-            msg="Equipment-Aufloesung fehlgeschlagen — Pipeline laeuft weiter",
+            msg="Equipment resolution failed — pipeline continues",
         )
-        report["warnings"].append(f"equipment: Aufloesung fehlgeschlagen ({e})")
+        report["warnings"].append(f"equipment: resolution failed ({e})")
     return report

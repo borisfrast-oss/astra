@@ -78,10 +78,17 @@ class DebayerAgent:
         
         self.debayered_dir.mkdir(parents=True, exist_ok=True)
         debayered: List[Path] = []
+        # V1.12-HEADER-PLATESOLVING S1: wcs for debayer (ra/dec from target, pixel_scale via fallback)
+        _deb_wcs = None
+        try:
+            if context and context.target and context.target.ra is not None and context.target.dec is not None:
+                _deb_wcs = {"ra": context.target.ra, "dec": context.target.dec, "pixel_scale_arcsec": 0.0}
+        except Exception:
+            _deb_wcs = None
         for i, frame_path in enumerate(calibration_result.calibrated_lights):
             out_path = self.debayered_dir / f"deb_{i:04d}.fits"
             try:
-                debayer_fits(frame_path, out_path, method=debayer_method)
+                debayer_fits(frame_path, out_path, method=debayer_method, context=context, wcs=_deb_wcs)
             except Exception as e:
                 # T5 (E1): Einzelframe ueberspringen, Rest weiterverarbeiten
                 logger.warning("debayer.frame_failed", path=str(frame_path), error=str(e))

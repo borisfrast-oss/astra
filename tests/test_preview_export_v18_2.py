@@ -267,10 +267,11 @@ class TestPreviewExportDocumentation:
 
     def test_preview_export_config_model_defaults_are_feature_defaults(self):
         """PreviewExportConfig-Model repraesentiert die empfohlenen Feature-Defaults."""
+        # T1-FIX 2026-09-14: saturation 1.2→1.0 neutral (vermeidet Ring/Clipping 4095)
         cfg = PreviewExportConfig()
         assert cfg.stretch == "asinh"
         assert cfg.scnr is True
-        assert cfg.saturation == pytest.approx(1.2)
+        assert cfg.saturation == pytest.approx(1.0)
         assert cfg.background_neutralization is True
 
     def test_processing_result_carries_preview_export(self, tmp_path: Path):

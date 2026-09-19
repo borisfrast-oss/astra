@@ -129,7 +129,7 @@ def test_build_observation_context_from_staged_input(tmp_path):
     root = tmp_path / "M3 Kugelsternhaufen"
     for i in range(13):
         _write_fits(root / "lights" / f"light_{i:04d}.fits", exptime=60, gain=40, obj="M 3")
-    # Dwarf3-App-Stack im Root (waere ohne Staging als Light 780s40 missdeutet)
+    # App-Stack im Root (waere ohne Staging als Light 780s40 missdeutet)
     _write_fits(root / "stacked-16_215935243.fits", exptime=780, gain=40, obj="M 3")
 
     input_dir = stage_input(root, tmp_path / "generated" / "20260805-120000")

@@ -1,7 +1,7 @@
 # suggested_parameters.yaml — Template for `astra suggest --output`
 # Source: astra/templates/suggested_parameters.yaml (repo template, cleanly commented)
 # Filled in by `astra suggest <TARGET> --output C:/Astra/<Target>/suggested.yaml`
-#   -> HEADER (TELESCOP/FILTER/EXPTIME/OBJECT) + target-cache.md (stella) + SIMBAD webfetch (on cache miss) + Handbook 22 (+ Ch.17) as rule basis (SSOT)
+#   -> HEADER (TELESCOP/FILTER/EXPTIME/OBJECT) + astra/data/target-cache.json (baked, 35 objects, minimal SIMBAD-Name/Typ/RA/Dec/Katalognummer/Aliase) + SIMBAD webfetch (on cache miss) + Handbook 22 (+ Ch.17) as rule basis (SSOT)
 # Schema version 1, extensible, extra="ignore" — unknown keys are tolerated (the pipeline ignores them).
 # handbook_ref examples (minors C19 06+07):
 #   M31 Galaxy (spiral): "22 §3 Galaxies + 05-Galaxies.md" -> galaxy_standard
@@ -13,13 +13,13 @@
 # Debayer mandatory text CFA-GATE (M-3): cfa-drizzle = only after quality-gate pass + doc hint that "auto" remains a pipeline decision, suggest only recommends.
 #   V19-CFA-GATE: star_count 1 vs 20, quality gate, dithering detection, >50 dithered frames; pipeline chooses auto at the end, suggest only marks a suggestion.
 # Error (unknown target without cache/SIMBAD, offline): suggest fails with Exit 2 'suggest.simbad_unavailable'.
-# No fallback file is written. Solution: run with known TARGET from target-cache.md or add entry via stella.
+# No fallback file is written. Solution: run with known TARGET from astra/data/target-cache.json or add entry (baked, requires release).
 
 version: 1
 target: M31  # Example: M31 Andromeda — folder name / TARGET string (OBJECT header wins over TARGET when --header is given)
 simbad_name: M31  # SIMBAD resolution (e.g. M31=NGC224, C19=IC5146, M27=NGC6853)
-type: galaxy  # galaxy | nebula | planetary | globular | open_cluster | star | dark_nebula | snr — from target-cache.md / SIMBAD otype
-handbook_ref: "22 §3 Galaxies + 05-Galaxies.md"  # C19 -> "22 §4/§5 + 06+07", open cluster -> "22 §6 + 10", M27 -> "22 §4 + 08"
+type: galaxy  # galaxy | nebula | planetary | globular | open_cluster | star | dark_nebula | snr — from astra/data/target-cache.json / SIMBAD otype (live via classify_and_cite)
+handbook_ref: "05-Galaxies.md (handbook ch.5 + ch.22 Siril Workflow)"  # Examples: C19 -> "06-Emission-Nebulae.md + 07-Reflection-Nebulae.md", M27 -> "08-Planetary-Nebulae.md", Open cluster -> "09-Globular-Clusters.md or 10-Open-Clusters.md". See handbook/ on GitHub: https://github.com/borisfrast-oss/astra/tree/main/handbook
 source: cache  # cache | header | simbad — origin of the recommendation (offline-first: cache wins)
 preset: galaxy_standard  # galaxy_standard | nebula_standard | star_standard | nebula_narrowband (the latter only when Filter=Narrowband/Duo-Band + OIII target, otherwise nebula_standard — M-2)
 

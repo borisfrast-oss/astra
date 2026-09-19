@@ -68,12 +68,11 @@ cd astra
 pip install -e .[dev,astroalign]
 ```
 
-Copy `.env.example` to `.env` and edit the paths, then initialize:
+Initialize Astra:
 
 ```bash
-cp .env.example .env
-astra init --non-interactive
-astra doctor
+astra init --non-interactive    # reads env / flags, no prompts, writes config.yaml
+astra doctor                    # checks env, config, disk
 ```
 
 ### Running tests

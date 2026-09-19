@@ -125,7 +125,7 @@ FILENAME_PATTERNS = {
     # NOTE: dark_dwarf3 pattern exists because DwarfLab firmware does not
     # write FITS headers for dark/bias/flat frames. This is a known firmware
     # bug. See: decisions-astro.md DADR-002, plan.md V1.6-8.
-    # Teleskop (z.B. Dwarf3/M13)-Schema: dark_15s_60g_30C_1.fits (Header oft leer —
+    # DWARF Mini/M13-Schema: dark_15s_60g_30C_1.fits (Header oft leer —
     # Metadaten werden NUR aus dem Dateinamen gewonnen)
     "dark_dwarf3": re.compile(
         r'(?:dark|bias|flat|offset)'

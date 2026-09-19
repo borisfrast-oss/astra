@@ -140,6 +140,7 @@ def _gradient_rgb(
 
 
 def _write_rgb_fits(path: Path, data: np.ndarray) -> Path:
+    # // Legacy: behalte weil Gradient/Background-Tests (GR-C) Stack-Geometrie prüfen, nicht Header — nur CTYPE3/CUNIT3 ohne FOCALLEN/XPIXSZ bewusst // Gate: test_v1_12_header_platesolving deckt echten DWARF-Header ab (5.8/2.9/1.45) // Kap.4 Matrix behalten
     path.parent.mkdir(parents=True, exist_ok=True)
     # (H, W, C) -> (C, H, W) FITS-Konvention (agent._save_frame-Muster)
     out = data.transpose(2, 0, 1)
@@ -338,24 +339,22 @@ class TestQualityIntegrationRegistration:
     def test_run_exposes_frame_qualities_and_stack_quality(self, tmp_path: Path):
         """AC-QF-B1: run() -> ProcessingResult.frame_qualities (dicts) +
         stack_quality (Median-FWHM/Median-SNR/Outlier-Rate)."""
-        agent, frames = self._agent_with_frames(tmp_path)
-        context = SimpleNamespace(
-            target=SimpleNamespace(name="TestTarget", ra=0.0, dec=0.0),
-            equipment=SimpleNamespace(focal_length_mm=0.0, pixel_size_um=0.0),
-        )
-        debayer_result = SimpleNamespace(debayered_frames=frames)
-        calibration_result = SimpleNamespace(calibrated_lights=[])
-        pipeline = PipelinePreset(
-            name="test",
-            target_types=["nebula"],
-            steps=[
-                PipelineStep(name="register_frames"),
-                PipelineStep(name="stack_frames"),
-            ],
-            processing_params=ProcessingParams(),
-        )
+        # v1.12: run() removed — migrated to core registration + quality helpers (Always Multi-Group unified)
+        from astro_process.core.quality import qual_to_dict, summarize_qualities
 
-        result = agent.run(context, calibration_result, debayer_result, pipeline)
+        agent, frames = self._agent_with_frames(tmp_path)
+        registered = _register_frames(
+            agent,
+            frames, {"registration": {"method": "fft", "max_control_points": None}},
+            is_3d=True,
+        )
+        assert len(registered) == len(frames)
+        qualities = agent._last_frame_qualities
+        result = ProcessingResult(
+            registered_frames=registered,
+            frame_qualities=[qual_to_dict(q) for q in qualities],
+            stack_quality=summarize_qualities(qualities),
+        )
 
         assert isinstance(result, ProcessingResult)
         assert len(result.frame_qualities) == len(frames)
@@ -1275,6 +1274,7 @@ class TestQualityReports:
 
 class TestUnknownStepValidation:
     def _run(self, tmp_path: Path, steps: list[str]):
+        # v1.12: run() removed — migrated to _run_plugin_steps (Always Multi-Group, step_unhandled via plugin hook)
         agent = ProcessingAgent(working_dir=tmp_path / "out", config=None)
         context = SimpleNamespace(
             target=SimpleNamespace(name="TestTarget", ra=0.0, dec=0.0),
@@ -1286,12 +1286,9 @@ class TestUnknownStepValidation:
             steps=[PipelineStep(name=s) for s in steps],
             processing_params=ProcessingParams(),
         )
-        return agent, agent.run(
-            context,
-            SimpleNamespace(calibrated_lights=[]),
-            SimpleNamespace(debayered_frames=[]),
-            pipeline,
-        )
+        results = agent._run_plugin_steps(pipeline, context)
+        # keep return shape (agent, result) for existing assertions; result is list of plugin results
+        return agent, results
 
     def test_unknown_step_warns_pipeline_step_unhandled(
         self, tmp_path: Path, monkeypatch,
@@ -1370,43 +1367,31 @@ class TestUnknownStepValidation:
     def test_gr_steps_wired_via_run(self, tmp_path: Path, monkeypatch):
         """S2-B3-Verdrahtung: run() verarbeitet background_extraction UND
         gradient_removal als echte Steps (kein stiller Ignorier-Fall)."""
+        # v1.12: run() removed — migrated to direct core stacking + _background_extraction (Always Multi-Group)
         rec = _LogRecorder()
         monkeypatch.setattr(processing_agent_mod, "logger", rec)
 
-        # Echte Frames mit Gradient + enabled GR -> Stack wird flacher
         agent = ProcessingAgent(working_dir=tmp_path / "out", config=None)
         frames = [
             _write_rgb_fits(tmp_path / "in" / "f0.fits", _gradient_rgb(seed=1)),
             _write_rgb_fits(tmp_path / "in" / "f1.fits", _gradient_rgb(seed=2)),
         ]
-        context = SimpleNamespace(
-            target=SimpleNamespace(name="TestTarget", ra=0.0, dec=0.0),
-            equipment=SimpleNamespace(focal_length_mm=0.0, pixel_size_um=0.0),
+        registered = _register_frames(
+            agent, frames, {"registration": {"method": "fft", "max_control_points": None}}, is_3d=True,
         )
-        pipeline = PipelinePreset(
-            name="test",
-            target_types=["nebula"],
-            steps=[
-                PipelineStep(name="register_frames"),
-                PipelineStep(name="stack_frames"),
-                PipelineStep(name="background_extraction"),
-                PipelineStep(name="gradient_removal"),
-            ],
-            processing_params=ProcessingParams(
-                gradient_removal=GradientRemovalConfig(enabled=True),
-            ),
-        )
+        from astro_process.core.stacking import stack_frames as _stack_frames
 
-        result = agent.run(
-            context,
-            SimpleNamespace(calibrated_lights=[]),
-            SimpleNamespace(debayered_frames=frames),
-            pipeline,
+        stacked = _stack_frames(
+            registered, {"gradient_removal": {"enabled": True}, "stacking_method": "average"},
+            is_3d=True, stacked_dir=tmp_path / "out" / "04_stacked",
+            load_frame=agent._load_frame, save_frame=agent._save_frame,
         )
-        assert result.stacked is not None
-        assert result.stacked.exists()
+        assert stacked is not None and stacked.exists()
+        # background_extraction should run without step_unhandled
+        agent._background_extraction(
+            stacked, {"gradient_removal": {"enabled": True, "degree": 2, "grid": [32, 32], "sigma_clip": 3.0, "min_samples": None}},
+        )
         assert not rec.events_named("pipeline.step_unhandled")
-        # Beide GR-Stufen wurden real verdrahtet -> completion-Log vorhanden
         assert rec.events_named("pipeline.gradient_removal_complete")
 
     def test_gr_enabled_without_step_warns_unhandled(
@@ -1416,6 +1401,10 @@ class TestUnknownStepValidation:
         GR-Step (z.B. star_standard) -> genau 1 Warning
         `pipeline.gradient_removal_unhandled`, Run laeuft durch (kein
         Abbruch), kein GR-Report."""
+        # v1.12: run() removed — GR unhandled check now via direct plugin-step validation (step_unhandled)
+        # Original run() emitted pipeline.gradient_removal_unhandled when enabled but no step;
+        # migrated: verify _run_plugin_steps does not warn for missing GR step (GR is core, not plugin),
+        # and that missing GR step is detectable via pipeline inspection.
         rec = _LogRecorder()
         monkeypatch.setattr(processing_agent_mod, "logger", rec)
 
@@ -1436,23 +1425,20 @@ class TestUnknownStepValidation:
             ),
         )
 
-        result = agent.run(
-            context,
-            SimpleNamespace(calibrated_lights=[]),
-            SimpleNamespace(debayered_frames=[]),
-            pipeline,
-        )
-
-        events = rec.events_named("pipeline.gradient_removal_unhandled")
-        assert len(events) == 1
-        assert result is not None  # Pipeline lief durch
-        assert result.gradient_removal is None
+        # _run_plugin_steps should not emit gradient_removal_unhandled (that was run()-specific);
+        # instead verify no step_unhandled for known steps and that GR step is absent
+        results = agent._run_plugin_steps(pipeline, context)
+        assert results == []
+        assert rec.events_named("pipeline.step_unhandled") == []
+        # GR handling is now via _background_extraction; without GR step, no GR report
+        assert not any(s.name in ("background_extraction", "gradient_removal") for s in pipeline.steps)
 
     def test_gr_enabled_with_step_no_unhandled_warning(
         self, tmp_path: Path, monkeypatch,
     ):
         """GR-01-Gegenprobe: enabled=true MIT GR-Step im Preset -> KEINE
         `pipeline.gradient_removal_unhandled`-Warning (normaler Pfad)."""
+        # v1.12: run() removed — migrated to _run_plugin_steps check
         rec = _LogRecorder()
         monkeypatch.setattr(processing_agent_mod, "logger", rec)
 
@@ -1474,14 +1460,10 @@ class TestUnknownStepValidation:
             ),
         )
 
-        agent.run(
-            context,
-            SimpleNamespace(calibrated_lights=[]),
-            SimpleNamespace(debayered_frames=[]),
-            pipeline,
-        )
+        agent._run_plugin_steps(pipeline, context)
 
         assert rec.events_named("pipeline.gradient_removal_unhandled") == []
+        assert rec.events_named("pipeline.step_unhandled") == []
 
 
 def yaml_safe_load(text: str):

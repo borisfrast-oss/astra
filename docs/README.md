@@ -31,7 +31,7 @@ The `docs/` folder contains the user-facing, auto-generated documentation for As
 |  | `handbook/` | `docs/` |
 | --- | --- | --- |
 | **Focus** | Learn astrophotography & use Siril | Operate the `astro_process` pipeline |
-| **Tools** | Dwarf3, Siril 1.4.4, GraXpert, GIMP | Python, `astra-process`, FITS, config |
+| **Tools** | Dwarf mini, Siril 1.4.4, GraXpert, GIMP | Python, `astra-process`, FITS, config |
 | **Content** | 37 chapters: acquisition, calibration, stacking, object classes | 12 chapters: pipeline phases, CLI, config, presets, output |
 
 Both folders are independent.

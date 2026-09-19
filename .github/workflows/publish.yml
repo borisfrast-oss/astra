@@ -7,6 +7,14 @@ on:
     # GitHub Actions evaluates tags in order: a matching negative pattern after
     # a positive match excludes the ref (docs: workflow-syntax on.push.tags).
     tags: ['v*.*.*', '!v*.*.*-*']
+  # V1.12-PUBLISH-CI: CI muss grün sein vor Publish (S-C) — CI→publish Kopplung
+  # publish läuft nur nach grünem CI (workflow_run success); tag-Push ist via
+  # branch protection (required CI checks ubuntu/win) zusätzlich geschützt.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: ["main"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,6 +26,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # V1.12-PUBLISH-CI: CI muss grün sein vor Publish (S-C)
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned: actions/checkout v4 -> 11d5960a326750d5838078e36cf38b85af677262 (2026-09-04)
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # pinned: actions/setup-python v5 -> a26af69be951a213d495a4c3e4e4022e16d87065 (2026-09-04)
@@ -42,7 +52,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     # Defense-in-depth: prod publish only for final SemVer tags (no pre-release suffix).
-    if: ${{ !contains(github.ref, '-') }}
+    # V1.12-PUBLISH-CI: CI muss grün sein vor Publish (S-C) — needs: build impliziert CI-Gate (workflow_run success)
+    if: ${{ !contains(github.ref, '-') && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
     environment:
       name: pypi
       url: https://pypi.org/project/astra-pipeline/

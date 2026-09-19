@@ -172,7 +172,7 @@ def compute_group_hash(exptime: float, gain: int, filter_name: str) -> str:
     """Compute a human-readable group hash from acquisition parameters.
     
     Produces strings like "15s60" for (15.0, 60, "none")
-    or "60s40_Duo-Band" for (60.0, 40, "Duo-Band").
+    or "60s40_duo-band" for (60.0, 40, "Duo-Band") — klein-normiert (Boris-Entscheid 2, V1.12-ORGANIZE A1).
     
     Args:
         exptime: Exposure time in seconds
@@ -180,12 +180,13 @@ def compute_group_hash(exptime: float, gain: int, filter_name: str) -> str:
         filter_name: Filter name from FITS header
         
     Returns:
-        Human-readable hash string suitable for directory names
+        Human-readable hash string suitable for directory names (filter klein-normiert)
     """
     exptime_str = f"{exptime:.0f}s" if float(exptime) == int(exptime) else f"{exptime}s"
     gain_str = str(gain)
-    safe_filter = filter_name.strip().replace(" ", "_") if filter_name and filter_name.lower() not in ("none", "") else ""
+    safe_filter = filter_name.strip().replace(" ", "_") if filter_name and filter_name.strip().lower() not in ("none", "") else ""
     if safe_filter:
+        safe_filter = safe_filter.lower()
         return f"{exptime_str}{gain_str}_{safe_filter}"
     return f"{exptime_str}{gain_str}"
 

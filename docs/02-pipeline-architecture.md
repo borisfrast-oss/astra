@@ -83,7 +83,6 @@ Export — FITS copy, header enrichment, preview generation, and Siril-compatibl
 
 | Symbol | Kind | Description |
 | --- | --- | --- |
-| `effective_pixel_size_um` | function | — |
 | `annotate_export_header` | function | Enrich the export FITS header with best-effort metadata. |
 | `export_stretched_fits` | function | Write a stretched FITS for display purposes. |
 | `export` | function | — |
@@ -153,6 +152,7 @@ Auto-stretched JPG preview generation for quick visual inspection.
 | Symbol | Kind | Description |
 | --- | --- | --- |
 | `auto_asinh` | function | — |
+| `create_preview` | function | — |
 | `create_preview_jpg` | function | Create an auto-stretched JPG preview from a linear FITS file. |
 
 ### quality

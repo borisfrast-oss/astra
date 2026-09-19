@@ -724,34 +724,24 @@ class TestGradientRemovalReporting:
 class TestGradientRemovalSingleGroupReport:
     def test_run_exposes_gradient_removal_report(self, tmp_path: Path):
         """run() -> ProcessingResult.gradient_removal (applied + Parameter)."""
+        # v1.12: run() removed — migrated to direct _background_extraction via core stacking
+        from astro_process.core.quality import FrameQuality as _FQ  # noqa: F401
+        from test_registration import _register_frames as _reg
+
         agent = ProcessingAgent(working_dir=tmp_path / "out", config=None)
         frames = [
             _write_rgb_fits(tmp_path / "in" / "f0.fits", _gradient_rgb(seed=1)),
             _write_rgb_fits(tmp_path / "in" / "f1.fits", _gradient_rgb(seed=2)),
         ]
-        context = SimpleNamespace(
-            target=SimpleNamespace(name="TestTarget", ra=0.0, dec=0.0),
-            equipment=SimpleNamespace(focal_length_mm=0.0, pixel_size_um=0.0),
-        )
-        pipeline = PipelinePreset(
-            name="test",
-            target_types=["nebula"],
-            steps=[
-                PipelineStep(name="register_frames"),
-                PipelineStep(name="stack_frames"),
-                PipelineStep(name="gradient_removal"),
-            ],
-            processing_params=ProcessingParams(
-                gradient_removal=GradientRemovalConfig(enabled=True),
-            ),
-        )
+        registered = _reg(agent, frames, {"registration": {"method": "fft"}}, is_3d=True)
+        from astro_process.core.stacking import stack_frames as _stack
 
-        result = agent.run(
-            context,
-            SimpleNamespace(calibrated_lights=[]),
-            SimpleNamespace(debayered_frames=frames),
-            pipeline,
+        stacked = _stack(
+            registered, {"gradient_removal": {"enabled": True, "degree": 2, "grid": [16, 16], "sigma_clip": 3.0}}, is_3d=True,
+            stacked_dir=tmp_path / "out" / "04_stacked", load_frame=agent._load_frame, save_frame=agent._save_frame,
         )
+        gr = agent._background_extraction(stacked, {"gradient_removal": {"enabled": True, "degree": 2, "grid": [16, 16], "sigma_clip": 3.0}})
+        result = ProcessingResult(gradient_removal=gr, stacked=stacked)
 
         assert result.gradient_removal is not None
         assert result.gradient_removal["applied"] is True
@@ -763,33 +753,22 @@ class TestGradientRemovalSingleGroupReport:
     def test_run_disabled_report_is_none(self, tmp_path: Path):
         """disabled -> ProcessingResult.gradient_removal bleibt None (kein
         Report-Block, Legacy-kompatibel)."""
+        # v1.12: run() removed — migrated to direct _background_extraction
+        from test_registration import _register_frames as _reg
+
         agent = ProcessingAgent(working_dir=tmp_path / "out", config=None)
         frames = [
             _write_rgb_fits(tmp_path / "in" / "f0.fits", _gradient_rgb(seed=1)),
             _write_rgb_fits(tmp_path / "in" / "f1.fits", _gradient_rgb(seed=2)),
         ]
-        context = SimpleNamespace(
-            target=SimpleNamespace(name="TestTarget", ra=0.0, dec=0.0),
-            equipment=SimpleNamespace(focal_length_mm=0.0, pixel_size_um=0.0),
-        )
-        pipeline = PipelinePreset(
-            name="test",
-            target_types=["nebula"],
-            steps=[
-                PipelineStep(name="register_frames"),
-                PipelineStep(name="stack_frames"),
-                PipelineStep(name="gradient_removal"),
-            ],
-            processing_params=ProcessingParams(
-                gradient_removal=GradientRemovalConfig(enabled=False),
-            ),
-        )
+        registered = _reg(agent, frames, {"registration": {"method": "fft"}}, is_3d=True)
+        from astro_process.core.stacking import stack_frames as _stack
 
-        result = agent.run(
-            context,
-            SimpleNamespace(calibrated_lights=[]),
-            SimpleNamespace(debayered_frames=frames),
-            pipeline,
+        stacked = _stack(
+            registered, {"gradient_removal": {"enabled": False}}, is_3d=True,
+            stacked_dir=tmp_path / "out" / "04_stacked", load_frame=agent._load_frame, save_frame=agent._save_frame,
         )
+        gr = agent._background_extraction(stacked, {"gradient_removal": {"enabled": False}})
+        result = ProcessingResult(gradient_removal=gr, stacked=stacked)
 
         assert result.gradient_removal is None

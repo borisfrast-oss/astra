@@ -1,6 +1,6 @@
 # Workflow 07 – Reflection Nebulae
 
-# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini` (alias `dwarf3` deprecated since V19)
+# Dwarf mini + Siril 1.4.4 Best Practices Handbook — Profile `dwarf_mini`
 
 ---
 
@@ -8,7 +8,7 @@
 
 This workflow describes processing reflection nebulae with the Dwarf mini.
 
-> **Note (V19):** Since V19 the profile is named `dwarf_mini`; `dwarf3` remains as a deprecated alias for compatibility. Hardware identical.
+> **Note:** The equipment profile is named `dwarf_mini`; `dwarf3` is a deprecated alias (kept for backward compatibility).
 
 Examples:
 
@@ -233,6 +233,8 @@ Parameters:
 | Luminance | Active |
 | Maximum stars | 500 |
 | Distortion removal | Off |
+
+> **Note (V19-REG-SMART):** On AZ mounts (`dwarf_mini`) use `astroalign --max-rotation 15`; warning `registration.fft_on_az_mount` triggers vorsorglich at ≥45 s, sicher ab 60 s (stella D11 konservativ).
 
 ---
 

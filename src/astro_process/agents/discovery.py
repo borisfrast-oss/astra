@@ -208,7 +208,7 @@ class DiscoveryAgent:
         if use_flats and not context.calibration.flat_available:
             warnings.append("No flat frames - vignetting correction not possible")
         elif not use_flats and not context.calibration.flat_available:
-            # Keine Warnung bei Default (Teleskop (z.B. Dwarf3): keine Flats, Bias im Dark)
+            # Keine Warnung bei Default (DWARF Mini: keine Flats, Bias im Dark)
             pass
         
         # CR-001 W4 (P4): Warnung nur wenn use_bias=true UND 0 Bias
@@ -382,17 +382,16 @@ SHOTS_INFO_FILENAME = "shotsInfo.json"
 MAX_ROTATION_SUGGESTION_DEG = 30.0
 
 SHOTSINFO_MISSING_HINT = (
-    "Keine shotsInfo.json gefunden; Aufnahmemodus (AZ/EQ) unbekannt — "
-    "bei AZ-Aufnahmen ist Feldrotation möglich. Wird trotzdem bestmöglich "
-    "verarbeitet."
+    "No shotsInfo.json found; acquisition mode (AZ/EQ) unknown — "
+    "field rotation possible for AZ. Processing anyway with best effort."
 )
 
 SHOTSINFO_AZ_HINT = (
-    "Aufnahmemodus AZ (eq=false): Feldrotation möglich — FFT-Korrelation "
-    "kann dabei zuverlässig scheitern. astroalign-Registration wäre "
-    "empfehlenswert (--registration-method astroalign "
+    "Acquisition mode AZ (eq=false): field rotation possible — FFT-correlation "
+    "may reliably fail. astroalign registration recommended "
+    "(--registration-method astroalign "
     f"--max-rotation {MAX_ROTATION_SUGGESTION_DEG:.0f}). "
-    "Keine automatische Umstellung."
+    "No automatic switch."
 )
 
 
@@ -569,13 +568,13 @@ def build_recommendation(
         # Zeilen 1/5: AZ
         if is_duo:
             reason = (
-                "Duo-Band + AZ (eq=false): Feldrotation möglich — "
-                "SanityGuard-Default 2.0° kann AZ-Rotation blocken."
+                "Duo-Band + AZ (eq=false): field rotation possible — "
+                "SanityGuard default 2.0 deg may block AZ rotation."
             )
         else:
             reason = (
-                "AZ (eq=false): Feldrotation möglich — FFT-Korrelation "
-                "kann zuverlässig scheitern."
+                "AZ (eq=false): field rotation possible — FFT-correlation "
+                "may reliably fail."
             )
         method = "astroalign"
         suggested_cli = (
@@ -590,8 +589,8 @@ def build_recommendation(
         method = "astroalign"
         suggested_cli = "--registration-method astroalign"
         reason = (
-            "Duo-Band + EQ (eq=true): keine Feldrotation — astroalign "
-            "mit SanityGuard-Default reicht."
+            "Duo-Band + EQ (eq=true): no field rotation — astroalign "
+            "with SanityGuard default sufficient."
         )
     else:
         if not is_duo:
@@ -604,8 +603,8 @@ def build_recommendation(
             f"--max-rotation {MAX_ROTATION_SUGGESTION_DEG:.0f}"
         )
         reason = (
-            "Duo-Band, Aufnahmemodus unbekannt: AZ-Feldrotation möglich — "
-            "astroalign mit erhöhter Rotationstoleranz empfohlen."
+            "Duo-Band, acquisition mode unknown: AZ field rotation possible — "
+            "astroalign with increased rotation tolerance recommended."
         )
 
     recommendation = {
@@ -625,10 +624,10 @@ def build_recommendation(
         # RE-G (OQ-V1.3-3, Boris 2026-08-08): Empfehlung trotzdem ausgeben;
         # Installations-Hinweis ist Teil von suggested_cli/reason (AC-RE-G3).
         recommendation["suggested_cli"] = (
-            f'{suggested_cli}  # fehlt: pip install "astra[astroalign]"'
+            f'{suggested_cli}  # missing: pip install "astra[astroalign]"'
         )
         recommendation["reason"] = (
-            f'{reason} Installations-Hinweis: pip install "astra[astroalign]".'
+            f'{reason} Installation: pip install "astra[astroalign]".'
         )
     return recommendation
 

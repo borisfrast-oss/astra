@@ -14,7 +14,7 @@ Runs hinweg):
   Median gesetzt, **aber nur isolierte Einzelpixel** (3x3-Nachbarschaft
   ohne weiteren Kandidaten). Ausgedehnte Strukturen (Sterne, Nebel)
   bleiben erhalten, damit das Signal-P95 den Objektanteil misst und
-  ``star_count``/``fwhm_median`` unverfaelscht bleiben (Teleskop (z.B. Dwarf3) hat bei
+  ``star_count``/``fwhm_median`` unverfaelscht bleiben (DWARF Mini hat bei
   37-39 °C Hot-Pixel; ohne Clipping wird das Rauschmass verfaelscht —
   stella-Hinweis 3). ``noise = 1.4826 * MAD`` des geclippten Bildes.
 - **Signal (OQ-QF-2-A):** Objektanteil-Hoehe = Perzentil
@@ -445,6 +445,40 @@ def compute_frame_quality(
     image = np.asarray(image)
     if image.ndim != 2:
         raise ValueError(f"compute_frame_quality expects a 2D frame, got shape {image.shape}")
+
+    # NGC-non_finite Guard (V1.12-NGC): frames with NaN/Inf must not crash — they
+    # happen on stray saturated/CFA outliers (M27 30s40 derotation stress) and
+    # would otherwise propagate NaN via median/MAD/detect_stars into SNR/FWHM.
+    # Early guard: warn quality.non_finite + return degraded metrics (snr 0,
+    # star_count 0) so caller can still rank/flag the frame without crash.
+    # Frame wird nicht gecrasht, sondern als Low-Quality behandelt (verwerfen
+    # entscheidet reject_outlier_frames / stacking). Entspricht
+    # stack.non_finite_frame-Analogon auf Quality-Ebene.
+    if not np.all(np.isfinite(image)):
+        n_bad = int(np.count_nonzero(~np.isfinite(image)))
+        logger.warning(
+            "quality.non_finite",
+            bad_pixels=n_bad,
+            total=int(image.size),
+            action="snr=0 fwhm=None star_count=0",
+        )
+        # Alias fuer rg-Suche stacking/quality vereinheitlicht
+        logger.warning(
+            "quality.non_finite_frame_skipped",
+            bad_pixels=n_bad,
+            total=int(image.size),
+            reason="non_finite_pixel",
+        )
+        return FrameQuality(
+            snr=0.0,
+            fwhm_median=None,
+            star_count=0,
+            double_rate=None,
+            elongation_ratio=None,
+            elongation_warning=False,
+            elongation_unusable=False,
+            noise_sigma=None,
+        )
 
     cleaned = _clip_hot_pixels(image, k_hot=hot_pixel_k)
 

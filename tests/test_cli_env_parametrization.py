@@ -450,7 +450,7 @@ class TestB3CliHelp:
         result = runner.invoke(cli, ["process", "--help"])
         assert result.exit_code == 0, result.output
         assert "config.yaml" in result.output
-        assert "Subcommand" in result.output
+        assert "subcommand" in result.output.lower()
 
     def test_group_help_shows_config_hint(self):
         """`astra --help` nennt --config/-c mit Hinweis auf die Position
@@ -458,5 +458,5 @@ class TestB3CliHelp:
         runner = CliRunner()
         result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0, result.output
-        assert "Config-Datei" in result.output
-        assert "Subcommand" in result.output
+        assert "Config file" in result.output
+        assert "subcommand" in result.output.lower()

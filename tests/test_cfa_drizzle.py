@@ -47,6 +47,7 @@ from astro_process.models.core import (
 )
 
 # Helpers
+# // Legacy: behalte weil Drizzle-Shape-Helfer (AC-DRZ-2/12) Roh-CFA ohne Debayer prüft, nicht Header — minimal ohne FOCALLEN/XPIXSZ bewusst // Gate: test_v1_12_header_platesolving deckt echten Header ab (5.8/2.9/1.45) // Kap.4 Matrix behalten
 def _create_cfa_fits(path: Path, h=108, w=192, seed=42):
     rng = np.random.RandomState(seed)
     arr = rng.randint(0, 4000, (h,w)).astype(np.float32)
@@ -380,6 +381,7 @@ def test_def_004_cfa_quality_gate_rejection_rate():
 
 def _make_cfa_fits(path: Path, h=64, w=80, seed=0):
     """Create a small 2D CFA FITS file with enough structure to register/stack."""
+    # // Legacy: behalte weil CFA-Stack-Helfer (DEF-005 fallback malvar/superpixel) Geometrie prüft, nicht Header — nur EXPTIME/OBJECT ohne FOCALLEN/XPIXSZ bewusst // Gate: test_v1_12_header_platesolving deckt DWARF-Header ab (5.8) // Kap.4 Matrix behalten, Kap.8b C19 verifiziert 5.8 via header_utils
     rng = np.random.RandomState(seed)
     y, x = np.ogrid[:h, :w]
     arr = (500.0 + rng.normal(0, 10, (h, w))).astype(np.float32)
@@ -481,7 +483,7 @@ def _run_fallback_pipeline(tmp_path: Path, fallback: str):
 
     agent = ProcessingAgent(tmp_path, config=cfg)
     with patch.object(agent, "_apply_pcc_per_group", return_value=(None, "gaia_success")) as mock_pcc, \
-         patch("astro_process.agents.multi_group_agent.create_preview_jpg", return_value=None):
+         patch("astro_process.agents.multi_group_agent.create_preview", return_value=None):
         # For single group the reference group selection is trivial, but mock it
         # to avoid any dependency on registration metrics.
         with patch.object(

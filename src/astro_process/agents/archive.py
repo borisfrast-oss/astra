@@ -1,6 +1,7 @@
 """Archive Agent — creates agent-log.yaml in the output directory."""
 
 import json
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -48,6 +49,7 @@ class ArchiveResult:
     final_fits: Path | None = None
     agent_log: Path | None = None
     run_info: Path | None = None
+    suggested_used: Path | None = None
 
 
 class ArchiveAgent:
@@ -66,9 +68,11 @@ class ArchiveAgent:
             multi_group_metadata: dict | None = None,
             smoke_mode: bool = False,
             smoke_limit: int | None = None,
-            smoke_frames_total: int | None = None) -> ArchiveResult:
+            smoke_frames_total: int | None = None,
+            selected_groups: list[str] | None = None,
+            suggested_path: Path | None = None) -> ArchiveResult:
         """Create processing log.
-        
+
         Args:
             context: Observation context
             proc_result: Processing result
@@ -80,6 +84,8 @@ class ArchiveAgent:
             smoke_mode: V1.11-SUBSET — True if --limit was active (AC-SUBSET-3).
             smoke_limit: V1.11-SUBSET — N from --limit (or None if not active).
             smoke_frames_total: V1.11-SUBSET — total lights before limit (or None).
+            suggested_path: V1.12-SUGGESTED-ARCHIVE — Path to the used suggested.yaml/json
+                (via --from-suggested). Copied to generated/<ts>/suggested_used.*.
         """
         logger.info("archive.start", target=context.target.name)
 
@@ -104,6 +110,13 @@ class ArchiveAgent:
             smoke_frames_total=smoke_frames_total,
         )
 
+        # V1.12-SUGGESTED-ARCHIVE: suggested_used.* je Run (Reproduzierbarkeit).
+        # Kopiert das genutzte suggested-File (via --from-suggested) nach
+        # generated/<ts>/suggested_used.{yaml|json} (shutil.copy, nur wenn
+        # Quelle existiert, sonst skip ohne Fehler). run-info.json loggt den
+        # Pfad (suggested_used) wenn vorhanden.
+        result.suggested_used = self._archive_suggested(output_dir, suggested_path)
+
         # Fix-Sammlung v1.3 §3 (P0): run-info.json im Lauf-Ordner
         # (Aufnahmemodus + Gruppen-Uebersicht, leicht maschinenlesbar).
         result.run_info = self._write_run_info(
@@ -114,10 +127,43 @@ class ArchiveAgent:
             smoke_mode=smoke_mode,
             smoke_limit=smoke_limit,
             smoke_frames_total=smoke_frames_total,
+            selected_groups=selected_groups,
+            suggested_used=result.suggested_used,
+            calibration_result=calibration_result,
         )
 
         logger.info("archive.complete", output_dir=str(output_dir))
         return result
+
+    def _archive_suggested(self, output_dir: Path, suggested_path: Path | None) -> Path | None:
+        """V1.12-SUGGESTED-ARCHIVE: Kopiert genutztes suggested-File je Run.
+
+        Args:
+            output_dir: Lauf-Ordner generated/<ts> (Ziel).
+            suggested_path: Quelle via --from-suggested (kann None/fehlend sein).
+
+        Returns:
+            Pfad zu suggested_used.* im Lauf-Ordner oder None (skip ohne Fehler).
+        """
+        if suggested_path is None:
+            return None
+        src = Path(suggested_path)
+        if not src.is_file():
+            logger.info("archive.suggested_skip", reason="not_found", path=str(suggested_path))
+            return None
+        suffix = src.suffix.lower()
+        # .yaml/.yml/.json erhalten; unbekanntes Suffix -> .yaml Fallback
+        if suffix not in (".yaml", ".yml", ".json"):
+            suffix = ".yaml"
+        dest = output_dir / f"suggested_used{suffix}"
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy(str(src), str(dest))
+            logger.info("archive.suggested_copied", source=str(src), dest=str(dest))
+            return dest
+        except Exception as e:
+            logger.warning("archive.suggested_copy_failed", source=str(src), dest=str(dest), error=str(e))
+            return None
 
     def _write_run_info(
         self,
@@ -129,6 +175,9 @@ class ArchiveAgent:
         smoke_mode: bool = False,
         smoke_limit: int | None = None,
         smoke_frames_total: int | None = None,
+        selected_groups: list[str] | None = None,
+        suggested_used: Path | None = None,
+        calibration_result=None,
     ) -> Path | None:
         """Fix-Sammlung v1.3 §3 (P0): `run-info.json` im Lauf-Ordner.
 
@@ -182,6 +231,49 @@ class ArchiveAgent:
             # die effektive Zahl (Lights wurden in-place gekuerzt in cli.py).
             run_info["frames_considered"] = context.total_light_frames
             run_info["frames_total"] = smoke_frames_total
+
+        # V1.12-GROUP-SELECT (GROUP-SEL-4): Traceability selected_groups
+        # null → alle Gruppen implizit (Default unverändert v1.11), sonst Liste der gewählten Gruppen
+        run_info["selected_groups"] = list(selected_groups) if selected_groups is not None else None
+
+        # V1.12-SUGGESTED-ARCHIVE: Reproduzierbarkeit — genutztes suggested-File je Run
+        # None → kein suggested (skip ohne Fehler, Feld bleibt null für Traceability)
+        run_info["suggested_used"] = str(suggested_used) if suggested_used is not None else None
+
+        # V1.12-USAB-5: calibration block — dark_source + master_dark
+        # (mirrors agent-log.yaml calibration section so Stella can read it
+        # without parsing agent-log.yaml or event-log).
+        # Guard: attributes may be MagicMock in tests — use isinstance checks
+        # to only serialise real Path / dict / str values.
+        try:
+            if calibration_result is not None:
+                _master_dark_raw = getattr(calibration_result, "master_dark", None)
+                _master_dark_path = (
+                    str(_master_dark_raw)
+                    if isinstance(_master_dark_raw, (str, Path))
+                    else None
+                )
+                _dark_sources_raw = getattr(calibration_result, "dark_sources", None)
+                _dark_source_safe = (
+                    {str(k): str(v) for k, v in _dark_sources_raw.items()}
+                    if isinstance(_dark_sources_raw, dict) and _dark_sources_raw
+                    else None
+                )
+                _master_dark_paths_raw = getattr(calibration_result, "master_dark_paths", None)
+                _master_dark_paths_safe = (
+                    {str(k): str(v) for k, v in _master_dark_paths_raw.items()}
+                    if isinstance(_master_dark_paths_raw, dict) and _master_dark_paths_raw
+                    else None
+                )
+                run_info["calibration"] = {
+                    "master_dark": _master_dark_path,
+                    "dark_source": _dark_source_safe,
+                    "master_dark_paths": _master_dark_paths_safe,
+                }
+            else:
+                run_info["calibration"] = None
+        except Exception:
+            run_info["calibration"] = None
 
         log_path = output_dir / "run-info.json"
         try:
@@ -584,7 +676,7 @@ class ArchiveAgent:
                     "filter": meta.get("filter"),
                     "total_exposure": meta.get("total_exposure", 0.0),
                     "weight": meta.get("weight", 0.0),
-                    "pcc_status": meta.get("pcc_status", "pending"),
+                    "pcc_status": meta.get("pcc_status"),
                     # QF-B (AC-QF-B1): je Frame + Stack-Zusammenfassung
                     # (per Group, additiv aus group_metadata).
                     "frame_quality": meta.get("frame_quality", []),
@@ -603,6 +695,11 @@ class ArchiveAgent:
                     # AC-FSEL-D1: je Light-Frame score + Entscheidung (kept|percentile_rejected|threshold_rejected) + Grund
                     # Additiv — Legacy-Gruppen ohne selection bleiben valide (leeres dict).
                     "selection": meta.get("selection", {}),
+                    # V1.12-DRZ-COVERAGE V1.12-Nachfix: drizzle Block persistieren (pixfrac, n_distinct, hole, weight_map, phase_stats, shifts)
+                    # Beleg 08.09. zeigte Lücke: structlog hatte cfa_drizzle.complete, YAML war 3139B gekürzt ohne drizzle-Details.
+                    # Hier wird group_metadata["drizzle"] (aus multi_group_agent) 1:1 durchgereicht.
+                    "drizzle": meta.get("drizzle", {}) if isinstance(meta.get("drizzle"), dict) else {},
+                    "effective_stack_scale_factor": meta.get("effective_stack_scale_factor"),
                 })
             mg_section["merge"] = {
                 "method": multi_group_metadata.get("method", "weighted_average"),
@@ -624,6 +721,22 @@ class ArchiveAgent:
             mg_section["cross_group_registrations"] = (
                 multi_group_metadata.get("cross_group_registrations", [])
             )
+            # P-04-Mini (V1.12-FU-3): Merge Single-Stack Fallback — persistiert
+            # fuer agent-log.yaml (wie cfa_drizzle.hole_fallback). Wird von
+            # multi_group_agent.py als mg_metadata["merge.fallback"] (und
+            # Aliase merge_fallback/fallback) gesetzt; hier 1:1 in mg_section
+            # gespiegelt, damit `rg "merge\\.fallback"` trifft und `astra qc`
+            # es lesen kann.
+            _fb = (
+                multi_group_metadata.get("merge.fallback")
+                or multi_group_metadata.get("merge_fallback")
+                or multi_group_metadata.get("fallback")
+            )
+            if isinstance(_fb, dict) and _fb:
+                mg_section["merge"]["fallback"] = dict(_fb)
+                # Top-level Aliase fuer grep-Kompatibilitaet (merge.fallback)
+                mg_section["merge.fallback"] = dict(_fb)
+                mg_section["fallback"] = dict(_fb)
             log["multi_group"] = mg_section
 
         # V1.5-14 (W5): Strukturierte Warnings-Sektion im agent-log.yaml.
@@ -679,6 +792,31 @@ class ArchiveAgent:
                     warnings_list.append(ew)
                 else:
                     warnings_list.append({"source": "eq_mix", "message": str(ew)})
+            # P-04-Mini: Merge Fallback Warnung in warnings-Sektion (wie hole_fallback)
+            # Damit erscheint `merge.fell_back_to_single_group` explizit in agent-log.yaml
+            _fb_warn = (
+                multi_group_metadata.get("merge.fallback")
+                or multi_group_metadata.get("merge_fallback")
+                or multi_group_metadata.get("fallback")
+            )
+            if isinstance(_fb_warn, dict) and _fb_warn:
+                _ex = _fb_warn.get("excluded") or _fb_warn.get("excluded_groups") or "unknown"
+                if isinstance(_ex, list):
+                    _ex_str = ",".join(str(x) for x in _ex)
+                else:
+                    _ex_str = str(_ex)
+                _rem = _fb_warn.get("remaining_groups") or []
+                _lost = _fb_warn.get("integration_lost_pct")
+                warnings_list.append({
+                    "source": "merge.fell_back_to_single_group",
+                    "excluded_group": _ex_str,
+                    "remaining_groups": list(_rem) if isinstance(_rem, list) else _rem,
+                    "integration_lost_pct": _lost,
+                    "reason": _fb_warn.get("reason", "unknown"),
+                    "from": _fb_warn.get("from"),
+                    "to": _fb_warn.get("to"),
+                    "message": f"merge fell back to single group, {_ex_str} excluded — check cross_group gate / filter_typo",
+                })
 
         if warnings_list:
             log["warnings"] = warnings_list

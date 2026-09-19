@@ -1,7 +1,7 @@
-"""Auto-stretched JPG preview generation for quick visual inspection."""
+"""Auto-stretched preview generation for quick visual inspection — format-aware (TIFF 16-bit + JPG)."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 
 import numpy as np
 import structlog
@@ -182,38 +182,51 @@ def _apply_stretch(data: np.ndarray, method: str, sigma_factor: float) -> np.nda
     return data.astype(np.float64)
 
 
-def create_preview_jpg(
-    fits_path: Path, jpg_path: Path, quality: int = 85,
+def create_preview(
+    fits_path: Path,
+    preview_path: Path,
+    format: Literal["tiff", "jpg"] = "tiff",
+    quality: int = 85,
     stretch_factor: float = 1000.0,
     preview_config: Optional["PreviewExportConfig"] = None,
+    apply_flipud: bool = True,
 ) -> Optional[Path]:
-    """Create an auto-stretched JPG preview from a linear FITS file.
+    """Create an auto-stretched preview from a linear FITS file — format-aware.
 
-    Uses asinh (arcsinh) stretch for better dynamic range in astro images
-    (compresses bright star cores while lifting faint nebula detail).
+    V1.12-PREVIEW-FORMAT (AC-PREVIEW-FMT-1..2): TIFF 16-bit lossless (Default)
+    oder JPG 8-bit (Fallback). Ablauf ist format-unabhaengig identisch:
 
-    V1.8-2: Optional ``preview_config`` aktiviert die erweiterte Pipeline
-    (background_neutralization -> scnr -> stretch -> saturation -> jpg).
-    Ohne ``preview_config`` bleibt das Verhalten byte-identisch zu v1.6.
+    1. asinh-Stretch (falls preview_config oder legacy)
+    2. np.flipud (falls apply_flipud=True, DEF-016, symmetrisch fuer beide Formate)
+    3. Format-Export (TIFF 16-bit via tifffile, JPG 8-bit via Pillow)
+    4. Datei schreiben
+
+    Benennung konsistent: preview.tiff / preview_<hash>.tiff /
+    <target>_merged_preview.tiff (analog JPG).
 
     Args:
         fits_path: Path to input linear FITS file (H×W×3 RGB)
-        jpg_path: Path for output JPG file
-        quality: JPEG quality (0-100)
-        stretch_factor: Asinh stretch factor (Default 1000.0). Higher values
-            produce a more linear (less stretched) result; lower values
-            produce a more aggressive stretch. Typical range: 100-5000.
-        preview_config: V1.8-2 Preview/Export-Pipeline Einstellungen.
-            ``None`` -> Asinh-only Verhalten (v1.6).
+        preview_path: Path for output preview file (suffix should match format)
+        format: "tiff" (16-bit lossless, Default, Boris-Entscheid 07.09.2026)
+                or "jpg" (8-bit, schnell, ~500 KB)
+        quality: JPEG quality (0-100), only for jpg
+        stretch_factor: Asinh stretch factor (Default 1000.0)
+        preview_config: V1.8-2 Preview/Export-Pipeline Einstellungen
+            None -> Asinh-only (v1.6)
+        apply_flipud: Whether to apply np.flipud (DEF-016, default True).
+            Both formats must use the same flip (Siril-Konvention).
 
     Returns:
-        Path to JPG if created, None on failure
+        Path to preview if created, None on failure
     """
+    fmt = str(format).strip().lower() if isinstance(format, str) else "tiff"
+    if fmt not in ("tiff", "jpg"):
+        fmt = "tiff"
+
     try:
         from astropy.io import fits
-        from PIL import Image
     except ImportError as e:
-        logger.warning("preview.unavailable", package=e.name)
+        logger.warning("preview.unavailable", package=getattr(e, "name", str(e)))
         return None
 
     try:
@@ -226,7 +239,12 @@ def create_preview_jpg(
             data = data.transpose(1, 2, 0)  # (C, H, W) → (H, W, C)
 
         if preview_config is None:
-            # Legacy v1.6 path — byte-identisch
+            # Legacy v1.6 path — byte-identisch zu v1.6
+            # T1-Note 2026-09-14: sigma 3.0 (stretch 1000/333.3) bleibt Default;
+            # softening auf 4.0 (250 divisor / stretch 1333) testweise per
+            # stretch_factor Override in suggested.yaml möglich, aber global
+            # 4.0 würde faint Nebel killen — daher nur saturation 1.0 global,
+            # asinh softening scoped bei Bedarf.
             sigma_factor = max(stretch_factor / 333.3, 0.1)
             stretched = auto_asinh(data, sigma_factor=sigma_factor)
         else:
@@ -240,6 +258,11 @@ def create_preview_jpg(
                 stretched = _apply_background_neutralization(stretched)
 
             if preview_config.scnr:
+                # SCNR amount 0.5 unverändert; T1-Note: SCNR nur nach PCC
+                # wäre ideal (Sternfarbe rot statt gelb), aber preview.py
+                # kennt PCC-Status nicht — nächster Schritt: PCC-Flag via
+                # params durchreichen, bis dahin saturation 1.0 (statt 1.2)
+                # kompensiert gelb/grün Überstreckung ohne Code-Änderung.
                 stretched = apply_scnr(stretched, amount=0.5)
 
             sigma_factor = max(stretch_factor / 333.3, 0.1)
@@ -248,17 +271,83 @@ def create_preview_jpg(
             if preview_config.saturation != 1.0:
                 stretched = _apply_saturation(stretched, preview_config.saturation)
 
-        # Convert to 8-bit RGB
-        img_8bit = (np.clip(stretched, 0.0, 1.0) * 255).astype(np.uint8)
+        # Ensure output dir exists
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Save as JPG
-        img = Image.fromarray(img_8bit, mode='RGB')
-        img.save(jpg_path, 'JPEG', quality=quality)
-
-        size_kb = jpg_path.stat().st_size // 1024
-        logger.info("preview.created", path=str(jpg_path), size_kb=size_kb)
-        return jpg_path
+        if fmt == "tiff":
+            # 16-bit TIFF lossless — use tifffile (Pillow cannot handle uint16 RGB)
+            try:
+                import tifffile
+            except ImportError as e:
+                logger.warning("preview.tifffile_unavailable", package=getattr(e, "name", str(e)))
+                return None
+            img_16bit = (np.clip(stretched, 0.0, 1.0) * 65535).astype(np.uint16)
+            if apply_flipud:
+                img_16bit = np.flipud(img_16bit)
+            # photometric: rgb for 3-channel, minisblack for 2D
+            if img_16bit.ndim == 3 and img_16bit.shape[-1] == 3:
+                tifffile.imwrite(str(preview_path), img_16bit, photometric="rgb")
+            else:
+                tifffile.imwrite(str(preview_path), img_16bit, photometric="minisblack")
+            size_kb = preview_path.stat().st_size // 1024
+            logger.info("preview.created", path=str(preview_path), format="tiff", bitdepth=16, size_kb=size_kb)
+            return preview_path
+        else:
+            # 8-bit JPG
+            try:
+                from PIL import Image
+            except ImportError as e:
+                logger.warning("preview.unavailable", package=getattr(e, "name", str(e)))
+                return None
+            img_8bit = (np.clip(stretched, 0.0, 1.0) * 255).astype(np.uint8)
+            if apply_flipud:
+                img_8bit = np.flipud(img_8bit)
+            # Handle grayscale or RGB
+            if img_8bit.ndim == 3 and img_8bit.shape[-1] == 3:
+                img = Image.fromarray(img_8bit, mode="RGB")
+            elif img_8bit.ndim == 2:
+                img = Image.fromarray(img_8bit, mode="L")
+            else:
+                # Fallback: squeeze?
+                img = Image.fromarray(img_8bit)
+            img.save(preview_path, "JPEG", quality=quality)
+            size_kb = preview_path.stat().st_size // 1024
+            logger.info("preview.created", path=str(preview_path), format="jpg", bitdepth=8, size_kb=size_kb)
+            return preview_path
 
     except Exception as e:
-        logger.warning("preview.failed", error=str(e))
+        logger.warning("preview.failed", error=str(e), format=fmt)
         return None
+
+
+def create_preview_jpg(
+    fits_path: Path, jpg_path: Path, quality: int = 85,
+    stretch_factor: float = 1000.0,
+    preview_config: Optional["PreviewExportConfig"] = None,
+) -> Optional[Path]:
+    """Create an auto-stretched JPG preview from a linear FITS file.
+
+    Legacy wrapper for backward compatibility — delegates to
+    :func:`create_preview` with ``format="jpg"`` (AC-PREVIEW-FMT-2:
+    flipud bleibt symmetrisch, hier immer True = bisheriges v1.12-FLIP
+    Verhalten). Neue Code-Pfade sollten :func:`create_preview` direkt nutzen.
+
+    V1.8-2: Optional ``preview_config`` aktiviert die erweiterte Pipeline
+    (background_neutralization -> scnr -> stretch -> saturation -> jpg).
+    Ohne ``preview_config`` bleibt das Verhalten byte-identisch zu v1.6.
+
+    Args:
+        fits_path: Path to input linear FITS file (H×W×3 RGB)
+        jpg_path: Path for output JPG file
+        quality: JPEG quality (0-100)
+        stretch_factor: Asinh stretch factor (Default 1000.0).
+        preview_config: V1.8-2 Preview/Export-Pipeline Einstellungen.
+
+    Returns:
+        Path to JPG if created, None on failure
+    """
+    return create_preview(
+        fits_path, jpg_path, format="jpg",
+        quality=quality, stretch_factor=stretch_factor,
+        preview_config=preview_config, apply_flipud=True,
+    )

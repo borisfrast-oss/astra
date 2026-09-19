@@ -251,7 +251,7 @@ class TestDef006MultiGroupIntegration:
             mock_reg.return_value = RegisterFramesResult(registered=[p for p in [f.path for f in frame_infos]], last_frame_qualities=quals, last_frame_rejected=0, last_registration_metrics={})
             # capture stack_frames registered list
             captured = {}
-            def fake_stack(reg, params, is_3d, stacked_dir, load_frame, save_frame):
+            def fake_stack(reg, params, is_3d, stacked_dir, load_frame, save_frame, **kwargs):
                 captured["reg"] = list(reg)
                 # create dummy stacked file
                 out = stacked_dir / "stacked.fits"

@@ -68,11 +68,13 @@ def _build_light_target(root: Path, name: str = "TestTarget",
 
     Punkt 3 (Input-Staging): Die Pipeline liest NUR die konventionellen
     Input-Ordner — FITS direkt im Target-Root werden nicht mehr erkannt.
+    V1.12-ORGANIZE: lights liegen in group_*-Unterordnern (ORG-X1).
     """
     target = root / name
+    group_dir = target / "lights" / "group_15s60"
     for i in range(count):
         _create_light_fits(
-            target / "lights" / f"light_{i:04d}.fits", shape=shape, seed=7 + i
+            group_dir / f"light_{i:04d}.fits", shape=shape, seed=7 + i
         )
     return target
 
@@ -128,7 +130,6 @@ class TestNoCalibFlag:
             raise AssertionError("CalibrationAgent.run darf mit --no-calib nicht laufen")
 
         with patch.object(CalibrationAgent, "run", side_effect=_fail) as mock_cal, \
-             patch.object(ProcessingAgent, "run", return_value=ProcessingResult()), \
              patch.object(ProcessingAgent, "process_multi_group", return_value=ProcessingResult()):
             result = runner.invoke(cli, ["process", str(target), "--from-suggested", "--no-calib"])
 
@@ -141,8 +142,7 @@ class TestNoCalibFlag:
         target = _build_light_target(tmp_path)
         write_default_suggested(target)
         runner = CliRunner()
-        with patch.object(ProcessingAgent, "run", return_value=ProcessingResult()), \
-             patch.object(ProcessingAgent, "process_multi_group", return_value=ProcessingResult()):
+        with patch.object(ProcessingAgent, "process_multi_group", return_value=ProcessingResult()):
             result = runner.invoke(cli, ["process", str(target), "--from-suggested", "--no-calib"])
         assert result.exit_code == 0, result.output
         assert "Calibration: skipped" in result.output
@@ -166,10 +166,9 @@ class TestNoCalibFlag:
 
         cal_result = CalibrationResult(
             working_dir=target / "generated",
-            calibrated_lights=sorted((target / "lights").glob("light_*.fits")),
+            calibrated_lights=sorted((target / "lights" / "group_15s60").glob("*.fits")),
         )
         with patch.object(CalibrationAgent, "run", return_value=cal_result) as mock_cal, \
-             patch.object(ProcessingAgent, "run", return_value=ProcessingResult()), \
              patch.object(ProcessingAgent, "process_multi_group", return_value=ProcessingResult()):
             result = runner.invoke(cli, ["-c", str(config_path), "process", str(target),
                                          "--from-suggested", "--calib"])
@@ -272,6 +271,6 @@ class TestDoctorCommand:
             with patch("astro_process.cli._run_with_timeout", side_effect=timeout_fn):
                 result = runner.invoke(cli, ["-c", "config.yaml", "doctor"])
 
-        assert "Query Timeout" in result.output
+        assert "query timeout" in result.output.lower()
         assert "GAIA Timeout nach 10s" not in result.output
 

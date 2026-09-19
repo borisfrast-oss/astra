@@ -296,7 +296,7 @@ class TestM27Analog:
     def test_duo_band_metadata_and_structure(self, tmp_path: Path):
         scene = synthetic.generate_m27_analog(tmp_path, seed=SAME_SEED)
 
-        assert scene.dataset.group_keys == ["30s40_Duo-Band"]
+        assert scene.dataset.group_keys == ["30s40_duo-band"]
         assert scene.filter_name == "Duo-Band"
         assert scene.object_name == "M 27"
 

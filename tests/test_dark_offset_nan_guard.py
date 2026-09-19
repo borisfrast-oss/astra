@@ -291,7 +291,13 @@ class TestNaNGuardStacking:
         assert np.all(np.isfinite(result))
         assert np.allclose(result, 1.0)
         events = [c.args[0] for c in mock_logger.warning.call_args_list]
-        assert events == ["stack.non_finite_frame", "stack.non_finite_frame"]
+        # NGC-Guard emits alias stacking.non_finite_frame_skipped alongside legacy
+        # -> filter legacy events for strict count, allow alias extra
+        legacy = [e for e in events if e == "stack.non_finite_frame"]
+        assert legacy == ["stack.non_finite_frame", "stack.non_finite_frame"]
+        # alias must be present per frame as well
+        alias = [e for e in events if e == "stacking.non_finite_frame_skipped"]
+        assert len(alias) == 2
 
     def test_all_frames_excluded_raises(self, tmp_path: Path):
         """Alle Frames Median 0 -> ValueError statt still ein kaputtes FITS."""

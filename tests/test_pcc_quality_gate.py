@@ -363,9 +363,9 @@ class TestQualityGateConfig:
 class TestMergedPccStatusPersistence:
     """ray Review Fix 1 (CRITICAL): Im Merged-PCC-Modus (pcc_per_group=
     False) warf process_multi_group den Rueckgabewert von
-    _apply_pcc_per_group weg → pcc_status blieb "pending" und
-    rejected_implausible_factors erreichte agent-log.yaml/run-info.json
-    NIE (Critical-1-Luecke aus Lauf 171059).
+    _apply_pcc_per_group weg → pcc_status blieb None (V1.12-FU-2:
+    pending→None) und rejected_implausible_factors erreichte
+    agent-log.yaml/run-info.json NIE (Critical-1-Luecke aus Lauf 171059).
 
     ray Review Fix 2 (MAJOR): MG-Header (MGCNTGRP) nur bei Erfolgsstatus;
     Idempotenz-Check und standalone `merge` werten Rejection-Marker VOR

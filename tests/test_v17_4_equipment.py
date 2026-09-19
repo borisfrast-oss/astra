@@ -139,7 +139,7 @@ def test_ac_a2_inconsistent_header_majority_wins_and_warns():
 
     assert ctx.equipment.pixel_size_um == 2.9
     joined = " | ".join(report["warnings"])
-    assert "inkonsistente" in joined and "pixel_size_um" in joined
+    assert "inconsistent" in joined and "pixel_size_um" in joined
 
 
 def test_ac_a2_majority_tie_break_first_occurrence():
@@ -161,7 +161,7 @@ def test_ac_a3_config_fallback_when_header_missing():
     assert ctx.equipment.sources["pixel_size_um"] == "config"
     assert report["profile"] == "DWARF mini"
     joined = " | ".join(report["warnings"])
-    assert "Config-Profil" in joined and "pixel_size_um" in joined
+    assert "from config profile" in joined and "pixel_size_um" in joined
 
 
 def test_ac_a4_unknown_field_none_and_pipeline_continues():
@@ -172,7 +172,7 @@ def test_ac_a4_unknown_field_none_and_pipeline_continues():
     assert ctx.equipment.pixel_size_um is None
     assert ctx.equipment.sources["pixel_size_um"] == "none"
     joined = " | ".join(report["warnings"])
-    assert "unbekannt" in joined and "pixel_size_um" in joined
+    assert "unknown" in joined and "pixel_size_um" in joined
 
 
 def test_ac_a5_focal_length_chain_focallen_over_config():
@@ -186,7 +186,7 @@ def test_ac_a5_focal_length_chain_focallen_over_config():
     assert ctx.equipment.focal_length_mm == 150
     assert ctx.equipment.sources["focal_length_mm"] == "fits_header"
     joined = " | ".join(report["warnings"])
-    assert "Widerspruch" in joined and "focal_length_mm" in joined
+    assert "header/config conflict" in joined and "focal_length_mm" in joined
 
 
 def test_ac_a5_focal_length_config_fallback_int_cast():
@@ -331,7 +331,7 @@ def test_oq4_mismatch_ninetynine_frames_header_wins():
     assert ctx.equipment.pixel_size_um == 2.9  # NICHT 3.76 aus dem Profil
     assert ctx.equipment.sources["pixel_size_um"] == "fits_header"
     joined = " | ".join(report["warnings"])
-    assert "Widerspruch" in joined and "pixel_size_um" in joined
+    assert "header/config conflict" in joined and "pixel_size_um" in joined
     assert report["profile"] == "DWARF mini"
 
 
@@ -725,7 +725,7 @@ def test_discovery_run_resolves_equipment(tmp_path):
     assert eq.sources["pixel_size_um"] == "fits_header"
     assert eq.width_px == 16
     # Ohne Config bleiben die restlichen Felder unbekannt (Warnings).
-    assert any("unbekannt" in w for w in result.warnings)
+    assert any("unknown" in w for w in result.warnings)
 
 
 def _default_config_yaml(data_root: str = ".") -> str:
@@ -757,7 +757,7 @@ def test_ac_d3_doctor_with_target_full_headers_ok(tmp_path):
 
     # Exit-Code bewusst nicht fixiert (optionale Deps wie astroquery
     # erzeugen eigene WARNs); ausschlaggebend ist die Equipment-Zeile.
-    assert "[OK] Equipment vollstaendig aus Headern" in result.output
+    assert "[OK] Equipment fully sourced from headers" in result.output
 
 
 def test_ac_d3_doctor_with_target_lists_missing_fields(tmp_path):
@@ -777,7 +777,7 @@ def test_ac_d3_doctor_with_target_lists_missing_fields(tmp_path):
     # Default-Profil liefert pixel_size_um (Config-Fallback) — telescope/
     # camera/aperture/focal fehlen komplett -> WARN mit Feldliste.
     assert result.exit_code == 1, result.output
-    assert "Equipment-Felder komplett ohne Quelle" in result.output
+    assert "Equipment fields have no source" in result.output
     assert "focal_length_mm" in result.output
 
 

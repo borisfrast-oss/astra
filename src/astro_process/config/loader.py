@@ -16,6 +16,7 @@ from .models import (
     FrameSelectionConfig,
     GradientRemovalConfig,
     PipelinePreset,
+    PreviewConfig,
     PreviewExportConfig,
     RegistrationConfig,
     StretchConfig,
@@ -155,20 +156,19 @@ plate_solve_enabled: false
 # astrometry_bin: "C:/Tools/astrometry/bin/solve-field.exe"
 # astrometry_index_dir: "C:/Tools/astrometry/index"
 
-# CR-001 W4 (P4): Flats/Bias Config-Defaults
-# Teleskop (z.B. Dwarf3): keine Flats, Bias im Dark enthalten
+# Flats/Bias: disabled by default (Dwarf Mini embeds bias in dark frame)
 use_flats: false
 use_bias: false
 
-# --no-calib: Kalibration ueberspringen fuer vor-kalibrierte Daten
-# (Lights gehen direkt zu Debayer/Processing; keine Darks/Flats/Bias-Anforderung)
+# --no-calib: skip calibration for pre-calibrated data
+# (lights go directly to debayer/processing; no darks/flats/bias required)
 no_calib: false
 
-# V1.8-1 (CFA-Drizzle): Drizzle-Config (Scale 2.0, auto pixfrac, lanczos3)
-# enabled: false = Default aus (AC-DRZ-1 byte-identisch v1.7).
-# quality_gate: Thresholds fuer Outlier-Filter VOR Drizzle.
-# pixfrac_mode: auto (dynamisch <10=1.0, 10-30=0.7, >30=0.5) | fixed.
-# fallback: malvar | superpixel | skip (unter min_frames, Default malvar).
+# CFA-Drizzle (upscale 2x, auto pixfrac, lanczos3) -- disabled by default (opt-in).
+# quality_gate thresholds: omitted here -> auto-defaults apply
+#   (fwhm [1.0,8.0], snr [0.8,null], star_count [1,null], corr [0.1,null]).
+# pixfrac_mode: auto (dynamic <10=1.0, 10-30=0.7, >30=0.5) | fixed.
+# fallback: malvar | superpixel | skip (below min_frames, default malvar).
 # cfa_drizzle:
 #   enabled: false
 #   scale: 2.0
@@ -176,61 +176,51 @@ no_calib: false
 #   pixfrac: 0.5
 #   kernel: "lanczos3"
 #   quality_gate:
+#     mode: "auto"
 #     rejection_enabled: true
-#     thresholds:
-#       fwhm: [1.5, 5.0]
-#       snr: [10, null]
-#       star_count: [20, null]
-#       correlation: [0.3, null]
+#     # thresholds: auto-defaults (fwhm [1.0,8.0], snr [0.8,null], star_count [1,null], corr [0.1,null])
+#     # thresholds:
+#     #   fwhm: [1.0, 8.0]
+#     #   snr: [0.8, null]
+#     #   star_count: [1, null]
+#     #   correlation: [0.1, null]
 #     elongation_unusable: true
+#     min_stars_cfa: 3
 #   min_frames: 5
 #   fallback: "malvar"
 
-# CR-001 W5 (P5-C): Darks-Bibliothek (Optional)
-# Pfad zur zentralen Darks-Bibliothek (_darks/ Ordnerstruktur)
+# Darks library (optional): path to central darks repository (_darks/ layout)
 # darks_repository: "C:/Astra/_darks"
 
-# Leo-Auftrag 2026-08-09 (Dark-Offset-Abgleich): Schwellen der Dark-Sanity-
-# Warnung calibration.dark_scale_mismatch (calibration.py _apply_calibration).
-# Effektive Schwelle: max(dark_scale_mismatch_abs, dark_scale_mismatch_frac *
-# light_bg). Defaults 5.0 DN / 4 % — erkennt die C20-Referenz (Dark 214.7 vs
-# Light 205.0, delta ~9.7 DN); der Auftragsvorschlag (10 % bzw. 10 DN) wuerde
-# C20 knapp verfehlen.
+# Dark sanity check thresholds (calibration.dark_scale_mismatch warning).
+# Effective threshold: max(dark_scale_mismatch_abs, dark_scale_mismatch_frac * light_bg).
+# Defaults 5.0 DN / 4% detect a typical offset mismatch.
 dark_scale_mismatch_abs: 5.0
 dark_scale_mismatch_frac: 0.04
 
-# Ray-Review M-1 (Low-Side-Check): Schwelle der Dark-Sanity-Warnung
-# calibration.dark_scale_mismatch_low (calibration.py _apply_calibration):
-# dark_bg < dark_scale_mismatch_low_frac * light_bg -> Warnung (C20-
-# Fehlerklasse 2: Lokal-Dark float32 0.003-0.04 vs Light ~205 -> Subtraktion
-# wirkungslos -> Hot Pixels bleiben). Default 0.5 (ray-Vorgabe ~0.5: gesunde
-# Darks liegen immer >= ~90 % von light_bg, also keine Fehlwarnungen). Nur
-# Warnung, kein Abbruch. Precedence Config > Default (kein CLI-Flag).
+# Dark sanity low-side check (calibration.dark_scale_mismatch_low warning):
+# fires when dark_bg < dark_scale_mismatch_low_frac * light_bg.
+# Default 0.5: healthy darks are always >= ~90% of light_bg. Warning only, no abort.
+# Precedence Config > Default (no CLI flag).
 dark_scale_mismatch_low_frac: 0.5
 
-# W9-B (AC-W9-B1/B4, ADR-019): Registrations-Methode.
-# method: "fft" = v1.1-Verhalten (Default, Translation-only via Hochpass-Grid).
-#         "astroalign" = Similarity-Transform (Rotation/Scale) — erfordert das
-#         Extra: pip install "astra[astroalign]" (fallback auf fft sonst).
-# max_control_points: astroalign-Kontrollpunkt-Limit, flux-sortiert (hellste
-# zuerst). null = astroalign-Default 50. Nur relevant bei "astroalign".
-# max_rotation_deg: SanityGuard-Schwelle (S1-A7): max. |Rotation| in Grad,
-# bevor ein astroalign-Ergebnis verworfen wird (FFT-Fallback). Default 2.0 =
-# bisheriges Verhalten. AZ-Aufnahmen (Feldrotation) koennen groessere Werte
-# brauchen (M27: ~7 Grad; --max-rotation CLI-Flag, Precedence CLI > Config >
-# Preset > Default). Nur relevant bei "astroalign".
-# max_scale_dev: SanityGuard-Schwelle (S1-A7): max. |scale - 1| Abweichung.
-# Default 0.02 = bisheriges Verhalten. Selten anzupassen — bewusst NUR
-# Config/Preset (kein CLI-Flag). Nur relevant bei "astroalign".
-# stack_scale_factor: F-META-1.2 (stella Punkt 5): Faktor der EFFEKTIVEN
-# Pixelgroesse des gestackten Outputs gegenueber der nativen XPIXSZ/YPIXSZ.
-# Default 2.0 (Teleskop (z.B. Dwarf3): nativ 1920x1080 (~2MP), Pixel 2.9 µm, Tele 150 mm
-# — der Stack ist durch den 2x2-Superpixel-Debayer genau 2x herunterskaliert;
-# KEINE 4K-Annahme mit zusaetzlichem Hardware-Binning) ->
-# Export-Header setzt XPIXSZ = nativer Wert x Faktor
-# (Fallback ohne PCC-Skala, z.B. nebula_standard/M27), damit Siril die
-# korrekte ~7.98 arcsec/px ableitet statt 3.99. Precedence Config > Preset
-# > Default (kein CLI-Flag).
+# Preview output format. Precedence: CLI --preview-format > Config > Default (tiff).
+# format: "tiff" (16-bit lossless) | "jpg" (8-bit, ~500 KB vs ~10-50 MB)
+preview:
+  format: "tiff"
+
+# W9-B (AC-W9-B1/B4): Registration method. Precedence: CLI > Config > Preset > Default.
+# method: "fft" = translation-only via high-pass grid (default).
+#         "astroalign" = similarity transform (rotation + scale);
+#         requires: pip install "astra[astroalign]" (falls back to fft if absent).
+# max_control_points: astroalign control point limit, flux-sorted. null = astroalign default (50).
+# max_rotation_deg: sanity guard -- max |rotation| in degrees before result is discarded
+#   (FFT fallback). Default 2.0. AZ sessions with field rotation may need higher values
+#   (e.g. M27: ~7 deg; set via --max-rotation CLI flag).
+# max_scale_dev: sanity guard -- max |scale - 1| deviation. Default 0.02. Config/Preset only.
+# stack_scale_factor: effective pixel size factor of stacked output vs native XPIXSZ/YPIXSZ.
+#   Default 2.0 (Dwarf Mini superpixel debayer halves resolution; XPIXSZ in export header
+#   = native pixel size x factor, so plate-solving tools derive correct arcsec/px).
 registration:
   method: "fft"
   max_control_points: null
@@ -240,21 +230,14 @@ registration:
   zero_shift_threshold: 0.05
   zero_shift_fallback: true
 
-# GR-B (AC-GR-B1): Gradient-Removal-Config (auch ueber CLI-Flags
-# --gradient-removal-* ueberschreibbar; Precedence CLI > Config > Preset >
-# Default — siehe resolve_gradient_removal).
-# enabled: false = Default (OQ-GR-1-A: erst nach Validierung aktiv; die
-#     Preset-Steps background_extraction/gradient_removal sind verdrahtet,
-#     aber bis zur Aktivierung v1.1-identisch, AC-GR-C3).
-# degree: Grad des 2D-Polynom-Hintergrundmodells (2 deckt
-#     Teleskop (z.B. Dwarf3)-Vignettierung + typische LP-Gradienten, OQ-GR-3).
-# grid: Sampling-Grid (rows, cols) der Zellen-Mediane. Default (16, 16) —
-#     M13-Real-Run-Validierung (AC-GR-C4, s2-b4-m13-grid-validierung):
-#     16x16 besser als 32x32 (residual_mad -31%/-27%, residual_max -40%).
-# sigma_clip: k in k*MAD Sigma-Clipping (OQ-GR-3 Default 3.0).
-# min_samples: Mindest-Sample-Zellen fuer den Fit; Unterschreitung ->
-#     Schritt uebersprungen + Warning, Pipeline laeuft weiter (AC-GR-B3).
-#     null = Anzahl der Polynom-Terme.
+# GR-B (AC-GR-B1): Gradient removal config. Precedence: CLI --gradient-removal-* > Config > Preset > Default.
+# enabled: false = default (opt-in per target via CLI or config).
+# degree: polynomial degree of the 2D background model (2 covers vignetting + light pollution).
+# grid: sampling grid (rows, cols) of cell medians. Default (16, 16) --
+#   16x16 better than 32x32 (residual_mad -31%/-27%, residual_max -40%).
+# sigma_clip: k in k*MAD sigma clipping. Default 3.0.
+# min_samples: minimum sample cells for fit; if below, step is skipped with a warning.
+#   null = number of polynomial terms.
 gradient_removal:
   enabled: false
   degree: 2
@@ -262,28 +245,21 @@ gradient_removal:
   sigma_clip: 3.0
   min_samples: null
 
-# Leo-Auftrag 2026-08-10 (Bad-Pixel-Korrektur, Teil A): Cosmetic-Correction-
-# Pipeline-Stufe zwischen Kalibrierung (01_calibrated) und Debayer
-# (02_debayered). Bad-Pixel-Map aus den kalibrierten Lights (Detektion),
-# defekte Pixel werden vor dem Debayer durch den Median der Nachbarpixel
-# derselben Bayer-Farbe (Distanz 2) ersetzt.
-# enabled: false = Default (bestehende Pipelines bleiben v1.3-identisch
-#     bis zur Freigabe). Precedence Config > Default (kein CLI-Flag).
-# n_frames: Mindestanzahl Frames, in denen ein Pixel heiss sein muss
-#     (stella-Vorgabe "3 von >= 8").
-# threshold: Schwelle in DN ueber der lokalen Umgebung (same-color-
-#     Nachbarmedian, Distanz 2).
-# dark_tolerance: Toleranz fuer "Master-Dark dort normal":
-#     dark < median(dark) + dark_tolerance (stella-Vorgabe Dark-BG + 20).
+# Cosmetic correction (bad-pixel map): pipeline stage between calibration and debayer.
+# Detects hot pixels from calibrated lights; replaces them with the median of
+# same-color Bayer neighbours (distance 2) before debayering.
+# enabled: false = default (opt-in). Precedence Config > Default (no CLI flag).
+# n_frames: minimum frames in which a pixel must be hot.
+# threshold: detection threshold in DN above local same-color neighbour median.
+# dark_tolerance: tolerance for "dark is normal there": dark < median(dark) + dark_tolerance.
 cosmetic_correction:
   enabled: false
   n_frames: 3
   threshold: 50.0
   dark_tolerance: 20.0
 
-# V1.8-1 (CFA-Drizzle): Drizzle-Config (Scale 2.0, auto pixfrac, lanczos3)
-# Default aus (AC-DRZ-1 byte-identisch v1.7). Precedence CLI > Config > Default.
-# V19-CFA-GATE G3: quality_gate.mode auto|cfa|debayered (Default auto -> CFA bei is_cfa True)
+# CFA-Drizzle active config (see commented example above for all options).
+# Default off. Precedence: CLI > Config > Default.
 cfa_drizzle:
   enabled: false
   scale: 2.0
@@ -293,96 +269,66 @@ cfa_drizzle:
   quality_gate:
     mode: "auto"
     rejection_enabled: true
-    thresholds:
-      fwhm: [1.5, 5.0]
-      snr: [10, null]
-      star_count: [20, null]
-      correlation: [0.3, null]
     elongation_unusable: true
     min_stars_cfa: 3
   min_frames: 5
   fallback: "malvar"
 
-# V1.7-2 FSEL-B (AC-FSEL-B1, OQ-FSEL-2 A): Frame-Selection (DwarfLab-Pattern).
-# Default disabled (opt-in), keep_percentile 92 (Top 92% behalten), min_frames 3.
-# Precedence Config > Preset > Default (siehe resolve_frame_selection).
-# weights: null = Default gleichverteilt (snr/star_count/fwhm/elongation).
-# Rundungsregel floor (AC-FSEL-B3): discard = floor(N * (100-keep)/100).
-# Bei <min_frames verbleibend → skip mit Warning selection.skipped_min_frames
-# und ALLE Frames stacken (AC-FSEL-B4). Nur Lights, je Gruppe unabhängig
-# (AC-FSEL-B5/B6).
+# Frame selection (percentile-based, opt-in). Precedence: Config > Preset > Default.
+# weights: null = uniform across active metrics (snr/star_count/fwhm/elongation).
+# Rounding rule floor: discard = floor(N * (100-keep) / 100).
+# If fewer than min_frames remain after selection, all frames are stacked (no discard).
+# Applied per group independently.
 # frame_selection:
 #   enabled: false
 #   keep_percentile: 92
 #   weights: null
 #   min_frames: 3
 
-# V19-PCC-FLAG P3: PCC Config (optional, Default null = Preset gewinnt)
-# DEF-014 (Fix): pcc.enabled steuert den photometric_color_calibration-Preset-Step.
-# null  = Preset gewinnt (kein Override — nebula_standard laeuft ohne PCC,
-#         galaxy_standard mit PCC, jeweils wie im Preset definiert).
-# true  = PCC-Step wird in den Preset eingefuegt wenn er fehlt (alle Presets mit PCC).
-# false = PCC-Step wird aus dem Preset entfernt wenn er vorhanden ist (nie PCC).
-# WICHTIG (DEF-014): Auch im Multi-Group-Pfad wird PCC NUR ausgefuehrt wenn
-# photometric_color_calibration im Preset-Step vorhanden ist. Ein noop (z.B.
-# nebula_standard + false: Step fehlt bereits) bedeutet kein PCC — vorher
-# lief PCC trotzdem (Bug, behoben). CLI > File > Config > Preset-Default.
+# PCC (photometric colour calibration) override. Precedence: CLI > Config > Preset.
+# null  = preset decides (galaxy_standard includes PCC, nebula_standard does not).
+# true  = force PCC even if the preset does not include it.
+# false = disable PCC even if the preset includes it.
 # pcc:
-#   enabled: null  # null = Preset gewinnt, true = immer PCC, false = nie PCC (CLI gewinnt immer)
+#   enabled: null
 #   quality_gate:
 #     enabled: true
 #     min_factor: 0.5
 #     max_factor: 2.0
 pcc:
-  enabled: null  # null = Preset gewinnt, true = immer PCC, false = nie PCC (DEF-014)
+  enabled: null  # null = preset decides; true = always PCC; false = never PCC
   quality_gate:
     enabled: true
     min_factor: 0.5
     max_factor: 2.0
 
-# V1.8-8 (DEF-006): Mandatory corr_hp Gate für Average-Pfad (stella a+c).
-# Analog V1.4-20 Cross-Group-Gate (MergeConfig.min_correlation 0.1), aber
-# intra-group VOR Stacking. Default 0.05 — frames mit corr_hp <0.05
-# (katastrophale Registration, Ghosting M92 0.004-0.01) werden auch bei
-# rejection_enabled=false verworfen (mandatory, nicht an Flag hängend).
-# Kombiniert mit outlier_excluded: verwirft wenn outlier_excluded==True
-# ODER corr_hp<Schwelle. Precedence Config > Preset > Default (siehe
-# resolve_rejection_min_corr_hp). None/null deaktiviert das Gate.
-# Top-level Config-Feld (AppConfig.rejection_min_corr_hp) oder Preset
-# (processing_params.rejection_min_corr_hp). CLI-Flag optional, Config Pflicht.
+# Mandatory correlation gate before stacking (intra-group).
+# Frames with corr_hp < threshold are rejected regardless of rejection_enabled.
+# Default 0.05 catches catastrophic registration failures.
+# None/null disables the gate. Precedence: Config > Preset > Default.
 # rejection_min_corr_hp: 0.05
 
-# V1.7-1 FSM-A (AC-FSM-A1/A2, OQ-FSM-2 A): Filter-Auswahl fuer den finalen
-# Gruppen-Merge. Default ``filters`` NICHT gesetzt (None) = alle Gruppen mergen
-# (v1.6-identisch, keine zusaetzlichen Warnings). Explizite Liste:
-# ``filters: ["Astro"]`` = NUR Gruppen deren FILTER-Wert exakt
-# case-insensitive getrimmt in der Liste steht, gehen in den finalen Merge
-# (kein Glob/Pattern, Beispiel Galaxy-Standard ["Astro"], Duo-Band separat).
-# CLI --merge-filter (wiederholbar) ueberschreibt Config (Precedence CLI > Config).
-# Leere Liste nach Normalisierung = keine Gruppe passt -> Merge-Skip mit Warning
-# (OQ-FSM-4 A, AC-FSM-A5). Auskommentiert = v1.6-Verhalten.
+# Merge filter: select which groups enter the final merge by FILTER header value.
+# Default (not set) = merge all groups.
+# Example: filters: ["Astro"] -- only groups with FILTER=Astro are merged.
+# Empty list after normalisation = no group matches -> merge skipped with warning.
+# CLI --merge-filter (repeatable) overrides Config.
 #   filters: ["Astro"]
 
-# V1.7-5 (Always Multi-Group): Multi-Group ist IMMER aktiv — das fruehere
-# Flag multi_group.enabled ist entfernt (OQ-AMG-5). Alte Configs mit dem
-# Feld laden weiter (extra="ignore").
+# Multi-group merge is always active.
 multi_group:
-  # V1.3-5: Default "quality" — Referenz nach Registrierungs-Qualität
-  # (registration_metrics, V1.3-3) statt Signalmaß (W14 "signal" wählte im
-  # M13-Fall die schwächste Gruppe). "signal" | "largest" | Hash bleiben
-  # als Option (Config-Override).
+  # Reference group selection strategy: "quality" (default, by registration quality)
+  # | "signal" | "largest" | <group_hash>.
   reference_group: "quality"
   pcc_fallback: "auto"
   merge:
     method: "weighted_average"
     weight_by: "frame_count"
-    # CR-001 W3 (AC-W3-1): Nicht-Referenz-Gruppen mit corr_hp < min_correlation
-    # (nach W1-Handling) werden aus dem Merge ausgeschlossen (Sicherheitsnetz);
-    # die Referenz-Gruppe wird nie geskippt. Stacks bleiben unter
-    # group_*/04_stacked/ erhalten.
+    # Non-reference groups with corr_hp < min_correlation are excluded from merge
+    # (safety net). Reference group is never excluded.
+    # Working dirs of excluded groups are kept under group_*/04_stacked/.
     min_correlation: 0.1
-    # V1.7-1 FSM-A: siehe Kommentar oberhalb (filters, CLI --merge-filter).
-    # filters: ["Astro"]
+    # filters: ["Astro"]  # see merge filter comment above
   keep_group_working_dirs: true
 
 equipment_profiles:
@@ -459,7 +405,8 @@ pipeline_presets:
       preview_export:
         scnr: true
         background_neutralization: true
-        saturation: 1.2
+        # saturation 1.0: neutral preview, avoids colour ring artefacts
+        saturation: 1.0
         stretch: "asinh"
 
   - name: "star_standard"
@@ -498,15 +445,13 @@ pipeline_presets:
       preview_export:
         scnr: true
         background_neutralization: true
-        saturation: 1.2
+        # saturation 1.0: neutral preview for narrowband/dual-band targets
+        saturation: 1.0
         stretch: "asinh"
 
-  # V1.6-2 (OQ-BIL-1, AC-BIL-B3) + V1.8-0 (MALVAR): Bilinear-Presets fuer volle Aufloesung.
-   # nebula_bilinear/galaxy_bilinear: Bilinear ist deprecated (Grace v1.8),
-   # Alternative fuer volle Aufloesung ist malvar (Malvar2004, kanten-erhaltend).
-   # nebula_bilinear: Bilinear Debayer + stack_scale_factor 1.0 (keine
-   # Herunterskalierung) — ideal fuer Detailerkennung (Plate-Solving,
-   # Annotierung).
+  # Bilinear presets (deprecated since v1.8 -- prefer malvar for full resolution).
+  # nebula_bilinear: bilinear debayer + stack_scale_factor 1.0 (no downscaling)
+  # -- useful for plate-solving and annotation workflows.
   - name: "nebula_bilinear"
     target_types: ["nebula_bilinear"]
     steps:
@@ -552,14 +497,34 @@ pipeline_presets:
 PRESET_CONFIGS_DIR = Path(__file__).parent.parent / "config" / "presets"
 
 
-def _warn_deprecated_profiles(cfg: AppConfig) -> None:
-    """V19-REG-SMART R1: Warn when deprecated equipment profile is used.
+def _warn_deprecated_profiles(cfg: AppConfig, user_config_raw: dict | None = None) -> None:
+    """V19-REG-SMART R1: Warn when deprecated equipment profile is explicitly
+    used in the user's config (not merely present in DEFAULT_CONFIG as an
+    alias definition).
+
+    Only fires when the user's own config.yaml explicitly lists a deprecated
+    profile name in equipment_profiles, not when the entry exists solely
+    because DEFAULT_CONFIG includes dwarf3 as a backward-compat alias.
 
     Loggt `equipment.profile_deprecated` fuer jedes Profil mit
-    `deprecated==True` (z.B. `dwarf3` Alias fuer `dwarf_mini`).
+    `deprecated==True` das der User explizit konfiguriert hat.
     """
+    # Build set of profile names from user config (not merged with defaults).
+    user_profile_names: set[str] = set()
+    if user_config_raw:
+        for p in (user_config_raw.get("equipment_profiles") or []):
+            if isinstance(p, dict) and p.get("name"):
+                user_profile_names.add(str(p["name"]))
+
     for profile in getattr(cfg, "equipment_profiles", []) or []:
         if getattr(profile, "deprecated", False):
+            # Only warn if the user explicitly defined this profile; skip
+            # deprecated entries that come exclusively from DEFAULT_CONFIG.
+            if user_profile_names and str(profile.name) not in user_profile_names:
+                continue
+            if not user_profile_names:
+                # No user config at all (pure DEFAULT_CONFIG run) — skip.
+                continue
             logger.warning(
                 "equipment.profile_deprecated",
                 profile=profile.name,
@@ -603,10 +568,11 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         if config_path.exists():
             with open(config_path, encoding="utf-8") as f:
                 user_config = yaml.safe_load(f) or {}
+            user_config_raw = dict(user_config)
             user_config = _expand_config_values(user_config)
             logger.info("config.loaded_from", source="explicit", path=str(config_path))
             cfg = AppConfig(**user_config)
-            _warn_deprecated_profiles(cfg)
+            _warn_deprecated_profiles(cfg, user_config_raw)
             return cfg
         # Nicht-existenter expliziter Pfad: bisheriges Verhalten beibehalten
         # (DEFAULT-Fallback, kein stilles Weiter-Entdecken).
@@ -615,7 +581,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         default_data = yaml.safe_load(DEFAULT_CONFIG)
         default_data = _expand_config_values(default_data)
         cfg = AppConfig(**default_data)
-        _warn_deprecated_profiles(cfg)
+        _warn_deprecated_profiles(cfg, None)  # pure DEFAULT: never warn
         return cfg
 
     for source, candidate in (
@@ -626,6 +592,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         if candidate.is_file():
             with open(candidate, encoding="utf-8") as f:
                 user_config = yaml.safe_load(f) or {}
+            user_config_raw = dict(user_config)
             user_config = _expand_config_values(user_config)
             # Layered ueber DEFAULT_CONFIG (siehe _deep_merge_dicts) — ein
             # partieller Fund (z.B. nur data_root + suggest.*) verliert nicht
@@ -634,14 +601,14 @@ def load_config(config_path: Path | None = None) -> AppConfig:
             merged_config = _deep_merge_dicts(default_data, user_config)
             logger.info("config.loaded_from", source=source, path=str(candidate))
             cfg = AppConfig(**merged_config)
-            _warn_deprecated_profiles(cfg)
+            _warn_deprecated_profiles(cfg, user_config_raw)
             return cfg
 
     logger.info("config.loaded_from", source="default")
     default_data = yaml.safe_load(DEFAULT_CONFIG)
     default_data = _expand_config_values(default_data)
     cfg = AppConfig(**default_data)
-    _warn_deprecated_profiles(cfg)
+    _warn_deprecated_profiles(cfg, None)  # pure DEFAULT: never warn
     return cfg
 
 
@@ -712,7 +679,7 @@ def resolve_registration(
     - max_scale_dev: Config-Block, sonst Preset, sonst 0.02. KEIN CLI-Flag
       (selten noetig, bewusst nur Config/Preset).
     - stack_scale_factor: Config-Block, sonst Preset, sonst 2.0 (F-META-1.2,
-      stella Punkt 5 — Teleskop (z.B. Dwarf3): nur 2x Superpixel-Debayer). KEIN
+      stella Punkt 5 — DWARF Mini: nur 2x Superpixel-Debayer). KEIN
       CLI-Flag — nur Config/Preset.
     - zero_shift_threshold: CLI-Flag (--zero-shift-threshold), sonst
       Config-Block, sonst Preset, sonst 0.05 (Default 0.05 = Guard aktiv
@@ -858,7 +825,7 @@ def resolve_stack_scale_factor(
       Methode (AC-EQPT-C2).
     - debayer_method in ("bilinear", "malvar"): 1.0 (keine Herunterskalierung,
       V1.8-0 malvar = volle Auflösung).
-    - debayer_method == "superpixel": 2.0 (Teleskop (z.B. Dwarf3)-Default).
+    - debayer_method == "superpixel": 2.0 (DWARF Mini-Default).
     - Default (weder Config noch Auto): 2.0 (Rueckwaertskompatibilitaet).
 
     Duenne Delegation an ``core.equipment.resolve_debayer_factor`` (V1.7-4):
@@ -1061,6 +1028,40 @@ def resolve_export_config(
     )
 
 
+def resolve_preview_format(
+    cfg: AppConfig,
+    cli_format: str | None = None,
+) -> str:
+    """V1.12-PREVIEW-FORMAT (AC-PREVIEW-FMT-1): effektives Preview-Format aufloesen.
+
+    Precedence: CLI (--preview-format) > Config (AppConfig.preview.format)
+    > Default ("tiff", Boris-Entscheid 07.09.2026).
+
+    Args:
+        cfg: AppConfig (kann None/fehlendes preview enthalten).
+        cli_format: CLI-Flag Wert ("tiff" | "jpg") oder None.
+
+    Returns:
+        "tiff" oder "jpg" (immer lower, validiert).
+    """
+    if cli_format is not None:
+        cli_lower = str(cli_format).strip().lower()
+        if cli_lower in ("tiff", "jpg"):
+            return cli_lower
+    if cfg is not None:
+        preview_cfg = getattr(cfg, "preview", None)
+        if preview_cfg is not None:
+            fmt = getattr(preview_cfg, "format", None)
+            if isinstance(fmt, str) and fmt.strip().lower() in ("tiff", "jpg"):
+                return fmt.strip().lower()
+    return "tiff"
+
+
+def _preview_extension(fmt: str) -> str:
+    """V1.12-PREVIEW-FORMAT: Dateierweiterung fuer Preview-Format."""
+    return ".tiff" if fmt == "tiff" else ".jpg"
+
+
 # ── V1.7-1 FSM-A: Merge Filter-Auswahl ──────────────────────────────────
 
 def resolve_cfa_drizzle(
@@ -1135,58 +1136,13 @@ def resolve_cfa_drizzle(
     )
 
 
-def normalize_merge_filters(filters: list[str] | None) -> list[str] | None:
-    """V1.7-1 FSM-A (AC-FSM-A2, OQ-FSM-2 A): Filter-Liste normalisieren.
-
-    Normalisierung: strip + lower (case-insensitive, getrimmt) je Eintrag.
-    Leere Strings nach dem Trimmen werden verworfen (best effort). Duplikate
-    bleiben erhalten (keine Deduplizierung noetig, Matching nutzt Set).
-
-    Args:
-        filters: Rohliste aus Config oder CLI (None = alle mergen).
-
-    Returns:
-        Normalisierte Liste (lower, getrimmt) oder None wenn Input None.
-        Leere Eingabe -> [] (kein Match -> Merge-Skip, AC-FSM-A5) — NICHT None.
-    """
-    if filters is None:
-        return None
-    normalized: list[str] = []
-    for raw in filters:
-        if not isinstance(raw, str):
-            raw = str(raw)
-        trimmed = raw.strip()
-        if not trimmed:
-            continue
-        normalized.append(trimmed.lower())
-    return normalized
-
-
-def is_merge_filter_match(
-    filter_value: str | None,
-    normalized_filters: list[str] | None,
-) -> bool:
-    """V1.7-1 FSM-A: Prueft ob ein Gruppen-FILTER zur Auswahl passt.
-
-    Args:
-        filter_value: FILTER-Wert der Gruppe (aus group_metadata["filter"]
-                      oder FITS HEADER FILTER; None/"" -> "none"/leer).
-        normalized_filters: Normalisierte Auswahl via normalize_merge_filters.
-                            None = alle mergen (AC-FSM-A1), [] = keine passt.
-
-    Returns:
-        True wenn Gruppe Merge-Kandidat ist, False wenn filter_excluded.
-    """
-    if normalized_filters is None:
-        return True
-    if not normalized_filters:
-        return False
-    # Gruppen-FILTER normalisieren: None/"" -> "" (nach trim/lower)
-    if filter_value is None:
-        candidate = ""
-    else:
-        candidate = str(filter_value).strip().lower()
-    return candidate in normalized_filters
+# V1.7-9 Zentralisierung: Filter-Helfer in core/merge_filter.py (ray M5)
+# Re-Export fuer Rueckwaertskompatibilitaet (bestehende Imports via config.loader bleiben gueltig)
+from ..core.merge_filter import (  # noqa: F401
+    check_filter_typos,
+    is_merge_filter_match,
+    normalize_merge_filters,
+)
 
 
 # ── V19-REG-SMART R3/R5 — Registration Priority Chain + Multi-Group ───

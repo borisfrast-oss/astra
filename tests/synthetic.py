@@ -77,7 +77,7 @@ def group_key(exptime: float, gain: int, filter_name: str | None = None) -> str:
 
     Mirrors ``astro_process.models.core.compute_group_hash`` without
     importing astro_process: ``"15s60"`` for (15.0, 60, None/"none") and
-    ``"60s40_Duo-Band"`` when a filter is present.
+    ``"60s40_duo-band"`` when a filter is present (klein-normiert, V1.12 A1).
     """
     exptime_str = (
         f"{float(exptime):.0f}s" if float(exptime) == int(exptime) else f"{exptime}s"
@@ -85,7 +85,7 @@ def group_key(exptime: float, gain: int, filter_name: str | None = None) -> str:
     gain_str = str(int(gain))
     safe_filter = ""
     if filter_name and str(filter_name).strip().lower() not in ("none", ""):
-        safe_filter = str(filter_name).strip().replace(" ", "_")
+        safe_filter = str(filter_name).strip().replace(" ", "_").lower()
     if safe_filter:
         return f"{exptime_str}{gain_str}_{safe_filter}"
     return f"{exptime_str}{gain_str}"

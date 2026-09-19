@@ -12,11 +12,11 @@
    # legacy `pip install astra` no longer works — use `astra-pipeline`
    astra --help
    ```
-2. **Adopt `.env` (one-time)** — copy, edit, regenerate config:
+2. **Initialize config (one-time)** — via CLI flags, env vars, or .env file:
    ```bash
-   cp .env.example .env          # edit ASTRA_DATA_ROOT, ASTRA_DARKS_REPOSITORY, GIMP_PATH
-   astra init --non-interactive  # reads .env + flags, writes config.yaml with RESOLVED absolute paths (no ${})
-   astra doctor                  # WARN doctor.env_missing if .env absent, Exit 0 (defaults used)
+   astra init --non-interactive --data-root "$ASTRA_DATA_ROOT" --darks-library "$ASTRA_DARKS_REPOSITORY"
+   # or: export ASTRA_DATA_ROOT="C:/Astra" && astra init --non-interactive
+   astra doctor                  # checks config, WARN doctor.env_missing if .env absent, Exit 0 (defaults used)
    ```
 3. **Verify equipment profile** — new default `dwarf_mini` (AZ, astroalign 15°, warn 45 s); alias `dwarf3` still loads but logs `WARN equipment.profile_deprecated alias=dwarf_mini`:
    ```bash
@@ -145,7 +145,7 @@ astra process M42 --preset nebula_standard --pcc --pcc-per-group # PCC per group
 Cross-platform config without Shell-Env requirement. `config.yaml` / `config.example.yaml` placeholders `${VAR:-default}` resolved **before** `yaml.safe_load` via manual regex (`${VAR:-default}` → `env[VAR]` if set and non-empty else `default`; `${VAR}`/`$VAR` → `env[VAR]` or `""`). Every string value is recursed (`_expand_env_string` in `loader.py`), then `Path(value).expanduser().resolve()` so `~/Astra` and `${HOME}/Astra` both work; empty strings stay empty (not resolved to `CWD`). Shell Env always wins over `.env` (`python-dotenv` `load_dotenv(..., override=False)`). Dotenv load order: `CWD/.env` > `pipeline_root/.env` (directory containing `src/astro_process/`), each via `find_dotenv`. Missing `.env` → `astra doctor` emits `WARN doctor.env_missing` ("`.env` not found, using defaults", not a silent ignore) with Exit 0; `astra doctor --fix` can create it from `.env.example`. `astra init --non-interactive` reads flags/env vars instead of prompts (CI-friendly, also used on `ubuntu-latest` + `windows-latest` CI), writes `config.yaml` with **resolved** absolute paths and no `${}`.
 
 ```
-Fresh: cp .env.example .env → edit → astra init --non-interactive → astra process
+Fresh: astra init --non-interactive (reads env/flags, no .env.example needed) → astra process
 Legacy: old config.yaml without ${} loads unchanged — no force migration
 ```
 

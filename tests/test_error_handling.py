@@ -151,7 +151,7 @@ class TestErrorHandling:
         """ALLE Lights einer Gruppe unlesbar -> discovery.group_empty, kein Crash."""
         root = tmp_path / "target"
         root.mkdir()
-        # Dateinamen im Dwarf3/M13-Schema, damit die Gruppe aus dem Namen
+        # Dateinamen im DWARF Mini/M13-Schema, damit die Gruppe aus dem Namen
         # ableitbar ist (Header ist unlesbar).
         for stem in ("15s60", "60s60"):
             (root / f"Corrupt_{stem}_Astro_20260717-231509939_33C.fits").write_bytes(
