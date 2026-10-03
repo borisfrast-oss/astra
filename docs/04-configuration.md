@@ -165,6 +165,113 @@
 
 ## config.yaml (Defaults/Presets)
 
+```yaml
+data_root: C:\Astra
+working_dir: ./working
+output_dir: ./output
+config_dir: ./config
+gimp_path: gimp
+default_preset: star_standard
+cpu_threads: 0
+gpu_acceleration: true
+keep_working: false
+quality_accept_threshold: 80
+quality_review_threshold: 60
+plate_solve_enabled: false
+use_flats: false
+use_bias: false
+no_calib: false
+darks_repository: C:\Astra\_darks
+dark_scale_mismatch_abs: 5.0
+dark_scale_mismatch_frac: 0.04
+dark_scale_mismatch_low_frac: 0.5
+preview:
+  format: tiff
+registration:
+  method: fft
+  max_control_points: null
+  max_rotation_deg: 2.0
+  max_scale_dev: 0.02
+  stack_scale_factor: 2.0
+  zero_shift_threshold: 0.05
+  zero_shift_fallback: true
+gradient_removal:
+  enabled: false
+  degree: 2
+  grid:
+  - 16
+  - 16
+  sigma_clip: 3.0
+  min_samples: null
+cosmetic_correction:
+  enabled: false
+  n_frames: 3
+  threshold: 50.0
+  dark_tolerance: 20.0
+cfa_drizzle:
+  enabled: false
+  scale: 2.0
+  pixfrac_mode: auto
+  pixfrac: 0.5
+  kernel: lanczos3
+  quality_gate:
+    mode: auto
+    rejection_enabled: true
+    elongation_unusable: true
+    min_stars_cfa: 3
+  min_frames: 5
+  fallback: malvar
+pcc:
+  enabled: null
+  quality_gate:
+    enabled: true
+    min_factor: 0.5
+    max_factor: 2.0
+multi_group:
+  reference_group: quality
+  pcc_fallback: auto
+  merge:
+    method: weighted_average
+    weight_by: frame_count
+    min_correlation: 0.1
+  keep_group_working_dirs: true
+equipment_profiles:
+- name: default
+  telescope: Unknown
+  aperture_mm: 0
+  focal_length_mm: 0
+  camera: Unknown
+  pixel_size_um: 3.76
+  gain: 100
+  offset: 50
+  default_temp_c: -10.0
+- name: dwarf_mini
+  telescope: Dwarf Mini
+  aperture_mm: 0
+  focal_length_mm: 150
+  camera: Dwarf Mini
+  pixel_size_um: 2.9
+  gain: 60
+  offset: 10
+  default_temp_c: 27.0
+  resolution:
+  - 1920
+  - 1080
+  debayer_factor: 2.0
+  bayer_pattern: RGGB
+  sensor: IMX462
+  mount_type: az
+  preferred_registration: astroalign
+  max_rotation_deg: 15
+  max_exptime_fft_warn: 45
+- name: dwarf3
+  deprecated: true
+  alias_for: dwarf_mini
+
+```
+
+Presets defined: 6
+
 ## Precedence & ENV
 
 - 1. CLI Flags (highest priority) — e.g. `--preset`, `--darks-path`, `--cosmetic-correction`

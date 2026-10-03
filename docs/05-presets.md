@@ -6,6 +6,150 @@
 
 **Choosing a preset?** Run `astra suggest <TARGET>` to get offline recommendations based on object type (galaxy/nebula/star) from the handbook and target-cache. See Handbook Ch. 17 and `03-cli-reference.md suggest` for details.
 
+## galaxy_standard
+
+**Target Types:** galaxy
+
+| Step | Params |
+| --- | --- |
+| create_master_dark | - |
+| calibrate_lights | - |
+| register_frames | - |
+| stack_frames | - |
+| background_extraction | - |
+| photometric_color_calibration | - |
+| scnr | - |
+| stretch | - |
+| export | - |
+
+| Param | Value |
+| --- | --- |
+| rejection | winsorized |
+| normalization | mul |
+| weight | noise |
+| stretch_method | asinh |
+| stretch_factor | 0.15 |
+
+## nebula_standard
+
+**Target Types:** nebula, emission_nebula, reflection_nebula, dark_nebula, planetary_nebula
+
+| Step | Params |
+| --- | --- |
+| create_master_dark | - |
+| calibrate_lights | - |
+| register_frames | - |
+| stack_frames | - |
+| gradient_removal | - |
+| background_extraction | - |
+| structure_enhancement | - |
+| stretch | - |
+| export | - |
+
+| Param | Value |
+| --- | --- |
+| rejection | winsorized |
+| normalization | mul |
+| weight | noise |
+| stretch_method | asinh |
+| stretch_factor | 0.12 |
+| preview_export | {'scnr': True, 'background_neutralization': True, 'saturation': 1.0, 'stretch': 'asinh'} |
+
+## star_standard
+
+**Target Types:** star, star_cluster, globular_cluster, open_cluster
+
+| Step | Params |
+| --- | --- |
+| create_master_dark | - |
+| calibrate_lights | - |
+| register_frames | - |
+| stack_frames | - |
+| natural_color_processing | - |
+| scnr | - |
+| stretch | - |
+| export | - |
+
+| Param | Value |
+| --- | --- |
+| rejection | winsorized |
+| normalization | add |
+| weight | none |
+| stretch_method | histogram |
+| stretch_factor | 0.1 |
+
+## nebula_narrowband
+
+**Target Types:** nebula_sh2, nebula_hoo, nebula_sh
+
+| Step | Params |
+| --- | --- |
+| create_master_dark | - |
+| calibrate_lights | - |
+| register_frames | - |
+| stack_frames_per_channel | - |
+| channel_combination | - |
+| gradient_removal | - |
+| stretch | - |
+| export | - |
+
+| Param | Value |
+| --- | --- |
+| rejection | winsorized |
+| normalization | mul |
+| weight | noise |
+| preview_export | {'scnr': True, 'background_neutralization': True, 'saturation': 1.0, 'stretch': 'asinh'} |
+
+## nebula_bilinear
+
+**Target Types:** nebula_bilinear
+
+| Step | Params |
+| --- | --- |
+| create_master_dark | - |
+| calibrate_lights | - |
+| register_frames | - |
+| stack_frames | - |
+| gradient_removal | - |
+| background_extraction | - |
+| structure_enhancement | - |
+| stretch | - |
+| export | - |
+
+| Param | Value |
+| --- | --- |
+| debayer_method | bilinear |
+| rejection | winsorized |
+| normalization | mul |
+| weight | noise |
+| stretch_method | asinh |
+| stretch_factor | 0.12 |
+
+## galaxy_bilinear
+
+**Target Types:** galaxy_bilinear
+
+| Step | Params |
+| --- | --- |
+| create_master_dark | - |
+| calibrate_lights | - |
+| register_frames | - |
+| stack_frames | - |
+| background_extraction | - |
+| photometric_color_calibration | - |
+| scnr | - |
+| stretch | - |
+| export | - |
+
+| Param | Value |
+| --- | --- |
+| debayer_method | bilinear |
+| rejection | winsorized |
+| normalization | mul |
+| weight | noise |
+| stretch_method | asinh |
+| stretch_factor | 0.15 |
+
 ## PCC Flag - Use Cases (V19-PCC-FLAG)
 
 PCC = Photometric Color Calibration (star detection + GAIA/VizieR matching + gray_world fallback). Timeout 30 s × retry can accumulate to 6 min on star-poor fields (M31). CLI `--pcc/--no-pcc` (default `None` = Preset/Config wins, no breaking change) mutates preset steps in-memory (see `03-cli-reference.md`). Precedence: **CLI `--pcc/--no-pcc` > Config `pcc.enabled` > Preset Steps > Default**.
