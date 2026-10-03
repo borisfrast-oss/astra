@@ -314,16 +314,36 @@ class DocWriter:
         print(f"  [OK] Generated: {self.output_path.relative_to(REPO_ROOT)}")
 
 
+def _normalize_bytes(data: bytes) -> bytes:
+    """Normalize CRLF → LF so hashes are platform-independent (Windows CRLF vs Linux LF)."""
+    return data.replace(b"\r\n", b"\n")
+
+
+def _is_source_file(path: Path) -> bool:
+    """Return True if path should be included in the hash (excludes __pycache__ and .pyc).
+
+    git archive does not export gitignored files (__pycache__, *.pyc), so we
+    must skip them here to produce hashes identical to what rr/CI compute.
+    """
+    return "__pycache__" not in path.parts and path.suffix != ".pyc"
+
+
 def file_hash(path: Path) -> str:
-    """SHA256 hash of file or directory content for change detection."""
+    """SHA256 hash of file or directory content for change detection.
+
+    EOL-normalized (CRLF→LF) and __pycache__-excluded so hashes are identical
+    on Windows (CRLF checkout) and Linux (LF git-archive ZIP, CI, release-repo).
+    """
     if not path.exists():
         return ""
     if path.is_file():
-        return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+        if not _is_source_file(path):
+            return ""
+        return hashlib.sha256(_normalize_bytes(path.read_bytes())).hexdigest()[:16]
     hasher = hashlib.sha256()
     for file_path in sorted(path.rglob("*")):
-        if file_path.is_file():
-            hasher.update(file_path.read_bytes())
+        if file_path.is_file() and _is_source_file(file_path):
+            hasher.update(_normalize_bytes(file_path.read_bytes()))
     return hasher.hexdigest()[:16]
 
 
