@@ -74,6 +74,7 @@ from .config.models import MergeConfig, MultiGroupConfig, PipelinePreset
 from .core import suggest as suggest_core
 from .core.fits_parser import build_observation_context
 from .core.stacking import resolve_stack_method
+from .core.staging import FITS_SUFFIXES as STAGING_FITS_SUFFIXES
 from .core.staging import stage_input
 
 
@@ -189,12 +190,22 @@ def _run_preflight_checks(target_dir: Path, cfg: AppConfig, darks_path_override=
     """CLI-C: Hot Pixel Scan 2-3 Frames >20sigma, Dark-Passung, Cosmetic Empfehlung."""
     result = {"checks": [], "status": "OK", "hot_pixels": 0, "dark_ok": True, "cosmetic_recommend": False}
     try:
-        # Scan lights (max 3 frames)
-        fits_files = sorted(target_dir.glob("lights/*.fit*"))
-        if not fits_files:
-            fits_files = sorted(target_dir.glob("*.fit*"))[:3]
+        # Scan lights (max 3 frames) — DEF-019: group-aware Discovery.
+        # V1.12-ORGANIZE (ORG-X1): Lights liegen in lights/group_*/,
+        # 0 Frames im lights-Root. Flaches glob("lights/*.fit*") fand dort
+        # nichts -> faelschlich "No lights found". Pipeline-Quelle stattdessen:
+        # rglob unter lights/ inkl. group_*/-Unterordnern, Suffix-Check gegen
+        # staging.FITS_SUFFIXES (vgl. staging._count_fits). Deterministische
+        # Sortierung (Pfad), max 3 Frames fuer den Hot-Pixel-Scan.
+        lights_dir = target_dir / "lights"
+        if lights_dir.is_dir():
+            fits_files = sorted(
+                p
+                for p in lights_dir.rglob("*")
+                if p.is_file() and p.suffix.lower() in STAGING_FITS_SUFFIXES
+            )[:3]
         else:
-            fits_files = fits_files[:3]
+            fits_files = []
         hot_pixels = 0
         clipping = False
         for p in fits_files[:3]:

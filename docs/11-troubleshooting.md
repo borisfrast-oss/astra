@@ -193,29 +193,29 @@ via pcc_status agent-log + FU-2 + qc color context).
 
 | Exit code | Location |
 | --- | --- |
-| 0 | src/astro_process/cli.py:3720 |
-| 0 | src/astro_process/cli.py:3724 |
-| 0 | src/astro_process/cli.py:3729 |
-| 0 | src/astro_process/cli.py:4157 |
-| 0 | src/astro_process/cli.py:4196 |
-| 0 | src/astro_process/cli.py:4206 |
-| 0 | src/astro_process/cli.py:4299 |
-| 0 | src/astro_process/cli.py:4448 |
-| 1 | src/astro_process/cli.py:3702 |
-| 1 | src/astro_process/cli.py:3790 |
-| 1 | src/astro_process/cli.py:3837 |
-| 1 | src/astro_process/cli.py:3842 |
-| 1 | src/astro_process/cli.py:4046 |
-| 1 | src/astro_process/cli.py:4122 |
-| 1 | src/astro_process/cli.py:4185 |
-| 2 | src/astro_process/cli.py:1406 |
-| 2 | src/astro_process/cli.py:4035 |
-| 2 | src/astro_process/cli.py:4132 |
-| 2 | src/astro_process/cli.py:4167 |
-| 2 | src/astro_process/cli.py:4170 |
-| 2 | src/astro_process/cli.py:4180 |
-| 2 | src/astro_process/cli.py:4182 |
-| 2 | src/astro_process/cli.py:749 |
+| 0 | src/astro_process/cli.py:3731 |
+| 0 | src/astro_process/cli.py:3735 |
+| 0 | src/astro_process/cli.py:3740 |
+| 0 | src/astro_process/cli.py:4168 |
+| 0 | src/astro_process/cli.py:4207 |
+| 0 | src/astro_process/cli.py:4217 |
+| 0 | src/astro_process/cli.py:4310 |
+| 0 | src/astro_process/cli.py:4459 |
+| 1 | src/astro_process/cli.py:3713 |
+| 1 | src/astro_process/cli.py:3801 |
+| 1 | src/astro_process/cli.py:3848 |
+| 1 | src/astro_process/cli.py:3853 |
+| 1 | src/astro_process/cli.py:4057 |
+| 1 | src/astro_process/cli.py:4133 |
+| 1 | src/astro_process/cli.py:4196 |
+| 2 | src/astro_process/cli.py:1417 |
+| 2 | src/astro_process/cli.py:4046 |
+| 2 | src/astro_process/cli.py:4143 |
+| 2 | src/astro_process/cli.py:4178 |
+| 2 | src/astro_process/cli.py:4181 |
+| 2 | src/astro_process/cli.py:4191 |
+| 2 | src/astro_process/cli.py:4193 |
+| 2 | src/astro_process/cli.py:760 |
 
 ## Known issues reflected in releases
 

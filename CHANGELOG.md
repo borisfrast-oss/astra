@@ -4,6 +4,12 @@ All notable changes to **Astra** are documented here. Format oriented on
 [Keep a Changelog](https://keepachangelog.com/). Release audit details are
 maintained separately and are not shipped in this repository.
 
+## [1.12.1] - 2026-10-03
+
+### Fixed
+
+- **Preflight Group-Aware Discovery (DEF-019)** - `astra process --preflight` aborted with "No lights found" on every organized target (`lights\group_*\` layout), while `astra organize` reported READY. Root cause: preflight used a flat `glob("lights/*.fit*")` that only saw root-level frames, missing all frames in `group_*/` subfolders (standard since v1.12 organize). Fix: preflight now uses the same discovery source as the pipeline itself (`staging.FITS_SUFFIXES` + recursive scan on `lights/` including `group_*/`), unifying FITS-extension conventions (`.fit`/`.fits`/`.fts`). 4 regression tests added (`tests/test_preflight_group_discovery.py`: group layout OK, flat legacy OK, empty abort, missing `lights/` abort). Reported via Lyra companion STOPP (2026-10-03, 2 targets M57/M15).
+
 ## [1.12.0] - 2026-09-16
 
 ### Highlights
